@@ -24,3 +24,9 @@ python "$MESON_EXE" setup build \
   -Dcpp_link_args="-L$CPYTHON_DIR"
 
 echo "Configuration complete."
+
+echo "Start Compiling"
+python vendored-meson/meson/meson.py compile -C build
+
+echo "Start Installing"
+python vendored-meson/meson/meson.py install -C build
