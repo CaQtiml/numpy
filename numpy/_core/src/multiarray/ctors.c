@@ -943,7 +943,11 @@ PyArray_NewFromDescr_int(
      * __array_finalize__ below receives it
      */
     if (base != NULL) {
+        if (PyRegion_AddLocalRef(base)) {
+            goto fail;
+        }
         Py_INCREF(base);
+
         if (PyArray_SetBaseObject((PyArrayObject *)fa, base) < 0) {
             goto fail;
         }

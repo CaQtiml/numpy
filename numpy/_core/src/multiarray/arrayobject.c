@@ -167,6 +167,7 @@ PyArray_SetBaseObject(PyArrayObject *arr, PyObject *obj)
      * owns the data is set, it doesn't make sense to change it.
      */
     if (PyArray_BASE(arr) != NULL) {
+        PyRegion_RemoveLocalRef(obj);
         Py_DECREF(obj);
         PyErr_SetString(PyExc_ValueError,
                 "Cannot set the NumPy array 'base' "
@@ -207,14 +208,22 @@ PyArray_SetBaseObject(PyArrayObject *arr, PyObject *obj)
             break;
         }
 
+        if (PyRegion_AddLocalRef(tmp)){
+            Py_DECREF(obj);
+            PyRegion_RemoveLocalRef(obj);
+            return -1;
+        }
+            
 
         Py_INCREF(tmp);
         Py_DECREF(obj);
+        PyRegion_RemoveLocalRef(obj);
         obj = tmp;
     }
 
     /* Disallow circular references */
     if ((PyObject *)arr == obj) {
+        PyRegion_RemoveLocalRef(obj);
         Py_DECREF(obj);
         PyErr_SetString(PyExc_ValueError,
                 "Cannot create a circular NumPy array 'base' dependency");
@@ -222,7 +231,9 @@ PyArray_SetBaseObject(PyArrayObject *arr, PyObject *obj)
     }
 
     // printf("DEBUG: PyArray_SetBaseObject called, setting base to obj %p\n", obj);
-    if (PyRegion_AddRef((PyObject *)arr, obj)) {
+    if (PyRegion_TakeRef(arr, obj)) {
+        PyRegion_RemoveLocalRef(obj);
+        Py_DECREF(obj);
         return -1;
     }
 
