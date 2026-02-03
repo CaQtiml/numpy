@@ -64,6 +64,9 @@ maintainer email:  oliphant.travis@ieee.org
 #include "array_coercion.h"
 #include "multiarraymodule.h"
 
+// Include DRO region
+#include "region.h"
+
 /*NUMPY_API
   Compute the size of an array (in number of items)
 */
@@ -215,6 +218,11 @@ PyArray_SetBaseObject(PyArrayObject *arr, PyObject *obj)
         Py_DECREF(obj);
         PyErr_SetString(PyExc_ValueError,
                 "Cannot create a circular NumPy array 'base' dependency");
+        return -1;
+    }
+
+    // printf("DEBUG: PyArray_SetBaseObject called, setting base to obj %p\n", obj);
+    if (PyRegion_AddRef((PyObject *)arr, obj)) {
         return -1;
     }
 
@@ -417,6 +425,7 @@ _clear_array_attributes(PyArrayObject *self, npy_bool unraisable)
          * If fa->base is non-NULL, it is something
          * to DECREF -- either a view or a buffer object
          */
+        PyRegion_RemoveLocalRef(fa->base);
         Py_CLEAR(fa->base);
     }
 
@@ -449,6 +458,7 @@ _clear_array_attributes(PyArrayObject *self, npy_bool unraisable)
                 nbytes = 1;
             }
             PyDataMem_UserFREE(fa->data, nbytes, fa->mem_handler);
+            PyRegion_RemoveLocalRef(fa->mem_handler);
             Py_CLEAR(fa->mem_handler);
         }
         fa->data = NULL;
@@ -457,6 +467,7 @@ _clear_array_attributes(PyArrayObject *self, npy_bool unraisable)
     /* must match allocation in PyArray_NewFromDescr */
     npy_free_cache_dim(fa->dimensions, 2 * fa->nd);
     fa->dimensions = NULL;
+    PyRegion_RemoveLocalRef(fa->descr);
     Py_CLEAR(fa->descr);
     return 0;
 }
