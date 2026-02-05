@@ -1879,12 +1879,13 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
     }
 
     /* Full integer index */
+    // Handle the simple case of full integer indexing such as arr[3]=some_obj
     if (index_type == HAS_INTEGER) {
         char *item;
         if (get_item_pointer(self, &item, indices, index_num) < 0) {
             return -1;
         }
-        if (PyArray_Pack(PyArray_DESCR(self), item, op) < 0) {
+        if (PyArray_Pack_DuckTape(self, PyArray_DESCR(self), item, op) < 0) {
             return -1;
         }
         /* integers do not store objects in indices */

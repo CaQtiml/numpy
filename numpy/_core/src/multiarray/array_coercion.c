@@ -556,6 +556,89 @@ PyArray_Pack(PyArray_Descr *descr, void *item, PyObject *value)
     return res;
 }
 
+NPY_NO_EXPORT int
+PyArray_Pack_DuckTape(PyArrayObject* source, PyArray_Descr *descr, void *item, PyObject *value)
+{
+    if (NPY_UNLIKELY(descr->type_num == NPY_OBJECT)) {
+        /*
+         * We always have store objects directly, casting will lose some
+         * type information. Any other dtype discards the type information.
+         * TODO: For a Categorical[object] this path may be necessary?
+         */
+        if (PyRegion_AddRef(source, value)) {
+            return -1;
+        }
+        return NPY_DT_CALL_setitem(descr, value, item);
+    }
+
+    /* discover_dtype_from_pyobject includes a check for is_known_scalar_type */
+    PyArray_DTypeMeta *DType = discover_dtype_from_pyobject(
+            value, NULL, NPY_DTYPE(descr));
+    if (DType == NULL) {
+        return -1;
+    }
+    if (DType == (PyArray_DTypeMeta *)Py_None && PyArray_CheckExact(value)
+            && PyArray_NDIM((PyArrayObject *)value) == 0) {
+        /*
+         * WARNING: Do NOT relax the above `PyArray_CheckExact`, unless you
+         *          read the function doc NOTE carefully and understood it.
+         *
+         * NOTE: The ndim == 0 check should probably be an error, but
+         *       unfortunately. `arr.__float__()` works for 1 element arrays
+         *       so in some contexts we need to let it handled like a scalar.
+         *       (If we manage to deprecate the above, we can do that.)
+         */
+        Py_DECREF(DType);
+
+        PyArrayObject *arr = (PyArrayObject *)value;
+        if (PyArray_DESCR(arr) == descr && !PyDataType_REFCHK(descr)) {
+            /* light-weight fast-path for when the descrs obviously matches */
+            memcpy(item, PyArray_BYTES(arr), descr->elsize);
+            return 0;  /* success (it was an array-like) */
+        }
+        return npy_cast_raw_scalar_item(
+                PyArray_DESCR(arr), PyArray_BYTES(arr), descr, item);
+
+    }
+    if (DType == NPY_DTYPE(descr) || DType == (PyArray_DTypeMeta *)Py_None) {
+        /* We can set the element directly (or at least will try to) */
+        Py_XDECREF(DType);
+        return NPY_DT_CALL_setitem(descr, value, item);
+    }
+    PyArray_Descr *tmp_descr;
+    tmp_descr = NPY_DT_CALL_discover_descr_from_pyobject(DType, value);
+    Py_DECREF(DType);
+    if (tmp_descr == NULL) {
+        return -1;
+    }
+
+    char *data = PyObject_Malloc(tmp_descr->elsize);
+    if (data == NULL) {
+        PyErr_NoMemory();
+        Py_DECREF(tmp_descr);
+        return -1;
+    }
+    if (PyDataType_FLAGCHK(tmp_descr, NPY_NEEDS_INIT)) {
+        memset(data, 0, tmp_descr->elsize);
+    }
+    if (NPY_DT_CALL_setitem(tmp_descr, value, data) < 0) {
+        PyObject_Free(data);
+        Py_DECREF(tmp_descr);
+        return -1;
+    }
+    int res = npy_cast_raw_scalar_item(tmp_descr, data, descr, item);
+
+    if (PyDataType_REFCHK(tmp_descr)) {
+        if (PyArray_ClearBuffer(tmp_descr, data, 0, 1, 1) < 0) {
+            res = -1;
+        }
+    }
+
+    PyObject_Free(data);
+    Py_DECREF(tmp_descr);
+    return res;
+}
+
 
 static int
 update_shape(int curr_ndim, int *max_ndim,
