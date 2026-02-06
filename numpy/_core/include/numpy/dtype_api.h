@@ -538,6 +538,7 @@ typedef int (PyArrayDTypeMeta_GetConstant)(PyArray_Descr *descr, int ID, void *d
  *       elements is currently always unsafe.
  */
 typedef int(PyArrayDTypeMeta_SetItem)(PyArray_Descr *, PyObject *, char *);
+typedef int(PyArrayDTypeMeta_SetItem2)(PyArray_Descr *, PyObject *, char *, PyArrayObject *, PyObject *);
 typedef PyObject *(PyArrayDTypeMeta_GetItem)(PyArray_Descr *, char *);
 
 typedef struct {

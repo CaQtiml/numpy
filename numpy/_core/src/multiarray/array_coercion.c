@@ -557,7 +557,7 @@ PyArray_Pack(PyArray_Descr *descr, void *item, PyObject *value)
 }
 
 NPY_NO_EXPORT int
-PyArray_Pack_DuckTape(PyArrayObject* source, PyArray_Descr *descr, void *item, PyObject *value)
+PyArray_Pack_DuckTape(PyArrayObject* source, PyObject* old_value, PyArray_Descr *descr, void *item, PyObject *value)
 {
     if (NPY_UNLIKELY(descr->type_num == NPY_OBJECT)) {
         /*
@@ -565,10 +565,13 @@ PyArray_Pack_DuckTape(PyArrayObject* source, PyArray_Descr *descr, void *item, P
          * type information. Any other dtype discards the type information.
          * TODO: For a Categorical[object] this path may be necessary?
          */
-        if (PyRegion_AddRef(source, value)) {
-            return -1;
-        }
-        return NPY_DT_CALL_setitem(descr, value, item);
+        // if (PyRegion_AddRef(source, value)) {
+        //     return -1;
+        // }
+        // PyRegion_RemoveRef(source, old_value);
+        // printf("Enter PyArray_Pack_DuckTape and pass NPY_UNLIKELY\n");
+        // return NPY_DT_CALL_setitem(descr, value, item);
+        return NPY_DT_CALL_setitem2(descr, value, item, source, old_value);
     }
 
     /* discover_dtype_from_pyobject includes a check for is_known_scalar_type */

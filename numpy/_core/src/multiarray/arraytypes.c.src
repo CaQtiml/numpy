@@ -854,7 +854,27 @@ OBJECT_setitem(PyArray_Descr *descr, PyObject *op, char *ov)
     PyObject *obj;
 
     memcpy(&obj, ov, sizeof(obj));
+    Py_INCREF(op);
+    /* A newly created array/buffer may only be NULLed, so XDECREF */
+    Py_XDECREF(obj);
 
+    memcpy(ov, &op, sizeof(op));
+
+    return PyErr_Occurred() ? -1 : 0;
+}
+
+static int
+OBJECT_setitem2(PyArray_Descr *descr, PyObject *op, char *ov, PyArrayObject* src, PyObject* old_value)
+{
+    // printf("Accessed to OBJECT_setitem2\n");
+    PyObject *obj;
+
+    memcpy(&obj, ov, sizeof(obj));
+    // op is the new value.
+    if (PyRegion_AddRef(src, op)) {
+        return -1;
+    }
+    PyRegion_RemoveRef(src, old_value);
     Py_INCREF(op);
     /* A newly created array/buffer may only be NULLed, so XDECREF */
     Py_XDECREF(obj);
@@ -4594,6 +4614,9 @@ set_typeinfo(PyObject *dict)
         return -1;
     }
     NPY_DT_SLOTS(dtypemeta)->setitem = @NAME@_setitem;
+    #if @NAME@ == OBJECT
+    NPY_DT_SLOTS(dtypemeta)->setitem2 = OBJECT_setitem2;
+    #endif
     NPY_DT_SLOTS(dtypemeta)->get_constant = @NAME@_get_constant;
 
     /**end repeat**/

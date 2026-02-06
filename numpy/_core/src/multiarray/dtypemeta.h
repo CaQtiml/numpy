@@ -30,6 +30,7 @@ typedef struct {
      * Currently only used for experimental user DTypes.
      */
     PyArrayDTypeMeta_SetItem *setitem;
+    PyArrayDTypeMeta_SetItem2 *setitem2;
     PyArrayDTypeMeta_GetItem *getitem;
     /*
      * Either NULL or fetches a clearing function.  Clearing means deallocating
@@ -135,6 +136,8 @@ typedef struct {
     NPY_DT_SLOTS(NPY_DTYPE(descr))->getitem(descr, data_ptr)
 #define NPY_DT_CALL_setitem(descr, value, data_ptr)  \
     NPY_DT_SLOTS(NPY_DTYPE(descr))->setitem(descr, value, data_ptr)
+#define NPY_DT_CALL_setitem2(descr, value, data_ptr, src, old_value)  \
+    NPY_DT_SLOTS(NPY_DTYPE(descr))->setitem2(descr, value, data_ptr, src, old_value)
 #define NPY_DT_CALL_get_constant(descr, constant_id, data_ptr)  \
     NPY_DT_SLOTS(NPY_DTYPE(descr))->get_constant(descr, constant_id, data_ptr)
 

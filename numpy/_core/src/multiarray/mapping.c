@@ -1885,9 +1885,28 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
         if (get_item_pointer(self, &item, indices, index_num) < 0) {
             return -1;
         }
-        if (PyArray_Pack_DuckTape(self, PyArray_DESCR(self), item, op) < 0) {
-            return -1;
+        if (PyDataType_FLAGCHK(PyArray_DESCR(self), NPY_ITEM_REFCOUNT)) {
+            PyObject **obj_ptr = (PyObject **)item;
+            PyObject* old_value = *obj_ptr;
+
+            // ============ PRINT OLD VALUE ============
+            // if (old_value != NULL) {
+            //     PyObject *repr = PyObject_Repr(old_value);
+            //     if (repr != NULL) {
+            //         const char *str = PyUnicode_AsUTF8(repr);
+            //         fprintf(stderr, "OLD VALUE: %s\n", str);
+            //         Py_DECREF(repr);
+            //     }
+            // } else {
+            //     fprintf(stderr, "OLD VALUE: NULL (empty slot)\n");
+            // }
+            // =========================================
+            // printf("Before Entering PyArray_Pack_DuckTape\n");
+            if (PyArray_Pack_DuckTape(self, old_value, PyArray_DESCR(self), item, op) < 0) {
+                return -1;
+            }
         }
+       
         /* integers do not store objects in indices */
         return 0;
     }
