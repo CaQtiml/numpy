@@ -55,6 +55,30 @@ PyArray_ClearBuffer(
     return res;
 }
 
+NPY_NO_EXPORT int
+PyArray_ClearBuffer2(
+        PyArray_Descr *descr, char *data,
+        npy_intp stride, npy_intp size, int aligned,
+        NpyAuxData *caller_auxdata)
+{
+    if (!PyDataType_REFCHK(descr)) {
+        return 0;
+    }
+
+    NPY_traverse_info clear_info;
+    /* Flags unused: float errors do not matter and we do not release GIL */
+    NPY_ARRAYMETHOD_FLAGS flags_unused;
+    if (PyArray_GetClearFunction(
+            aligned, stride, descr, &clear_info, &flags_unused) < 0) {
+        return -1;
+    }
+
+    int res = clear_info.func(
+            NULL, clear_info.descr, data, size, stride, caller_auxdata);
+    NPY_traverse_info_xfree(&clear_info);
+    return res;
+}
+
 
 /*
  * Helper function to zero an array buffer.
@@ -118,6 +142,15 @@ PyArray_ZeroContiguousBuffer(
     if (!PyDataType_REFCHK(descr)) {
         return 0;
     }
+
+    ClearArrayAuxData *auxdata = PyMem_Malloc(sizeof(ClearArrayAuxData));
+    if (auxdata == NULL) {
+        return -1;
+    }
+    auxdata->base.free = clear_array_auxdata_free;
+    auxdata->base.clone = NULL;
+    auxdata->arr = arr;  /* borrowed — array is alive for duration of clear */
+
     /*
      * The contiguous path should cover practically all important cases since
      * it is difficult to create a non-contiguous array which owns its memory
@@ -125,9 +158,10 @@ PyArray_ZeroContiguousBuffer(
      */
     int aligned = PyArray_ISALIGNED(arr);
     if (PyArray_ISCONTIGUOUS(arr) || PyArray_IS_F_CONTIGUOUS(arr)) {
-        return PyArray_ClearBuffer(
+        return PyArray_ClearBuffer2(
                 descr, PyArray_BYTES(arr), descr->elsize,
-                PyArray_SIZE(arr), aligned);
+                PyArray_SIZE(arr), aligned,
+                (NpyAuxData *)auxdata);
     }
     int idim, ndim;
     npy_intp shape_it[NPY_MAXDIMS], strides_it[NPY_MAXDIMS];

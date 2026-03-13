@@ -548,7 +548,7 @@ PyArray_AssignFromCache_Recursive(
                  */
                 char *item;
                 item = (PyArray_BYTES(self) + i * PyArray_STRIDES(self)[0]);
-                if (PyArray_Pack(PyArray_DESCR(self), item, item_pyvalue) < 0) {
+                if (PyArray_Pack_DuckTape(self, NULL, PyArray_DESCR(self), item, item_pyvalue) < 0) {
                     goto finish_critical_section;
                 }
                 /* If this was an array(-like) we still need to unlike int: */

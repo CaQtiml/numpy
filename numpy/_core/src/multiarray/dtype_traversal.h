@@ -61,6 +61,7 @@ NPY_traverse_info_xfree(NPY_traverse_info *traverse_info)
     }
     traverse_info->func = NULL;
     NPY_AUXDATA_FREE(traverse_info->auxdata);
+    PyRegion_RemoveLocalRef(traverse_info->descr);
     Py_XDECREF(traverse_info->descr);
 }
 

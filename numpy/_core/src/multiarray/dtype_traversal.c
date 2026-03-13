@@ -25,6 +25,7 @@
 #include "array_method.h"
 #include "dtypemeta.h"
 #include "dtype_traversal.h"
+#include "refcount.h"
 
 
 /* Buffer size with the same use case as the one in dtype_transfer.c */
@@ -138,12 +139,17 @@ static int
 clear_object_strided_loop(
         void *NPY_UNUSED(traverse_context), const PyArray_Descr *NPY_UNUSED(descr),
         char *data, npy_intp size, npy_intp stride,
-        NpyAuxData *NPY_UNUSED(auxdata))
+        NpyAuxData *auxdata)
 {
+    ClearArrayAuxData *d = (ClearArrayAuxData*) auxdata;
+    PyArrayObject *arr = d->arr;
     PyObject *aligned_copy = NULL;
     while (size > 0) {
         /* Release the reference in src and set it to NULL */
         memcpy(&aligned_copy, data, sizeof(PyObject *));
+        // TODO: In fact, it should be PyRegion_RemoveRef(arr, aligned_copy) 
+        // PyRegion_RemoveLocalRef(aligned_copy);
+        PyRegion_RemoveRef(arr, aligned_copy);
         Py_XDECREF(aligned_copy);
         memset(data, 0, sizeof(PyObject *));
 

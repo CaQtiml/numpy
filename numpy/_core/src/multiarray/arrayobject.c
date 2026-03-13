@@ -496,6 +496,34 @@ array_dealloc(PyArrayObject *self)
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
+static int
+array_traverse(PyObject *self, visitproc visit, void *arg)
+{
+    PyArrayObject_fields *fa = (PyArrayObject_fields *)self;
+    // printf("Called array_traverse\n");
+    
+    /* Visit the base object if it exists */
+    // Py_VISIT(fa->base);
+    
+    /* Visit the descriptor */
+    // Py_VISIT(fa->descr);  // Have a freezing problem. Ignore for now.
+    
+    /* Visit the memory handler if it exists */
+    // Py_VISIT(fa->mem_handler);
+    
+    /* If array contains Python objects, visit each element */
+    if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data) {
+        npy_intp i, n = PyArray_SIZE((PyArrayObject *)self);
+        PyObject **data = (PyObject **)fa->data;
+        
+        for (i = 0; i < n; i++) {
+            Py_VISIT(data[i]);
+        }
+    }
+    
+    return 0;
+}
+
 NPY_NO_EXPORT int
 clear_array_attributes(PyArrayObject *self)
 {
@@ -1271,6 +1299,7 @@ array_iter(PyArrayObject *arr)
 }
 
 
+
 NPY_NO_EXPORT PyTypeObject PyArray_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "numpy.ndarray",
@@ -1291,4 +1320,5 @@ NPY_NO_EXPORT PyTypeObject PyArray_Type = {
     .tp_methods = array_methods,
     .tp_getset = array_getsetlist,
     .tp_new = (newfunc)array_new,
+    .tp_traverse = (traverseproc)array_traverse,
 };
