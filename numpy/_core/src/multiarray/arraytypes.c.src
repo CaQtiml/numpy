@@ -847,6 +847,22 @@ OBJECT_getitem(void *ip, void *NPY_UNUSED(ap))
     }
 }
 
+static PyObject *
+OBJECT_getitem2(void *ip, void *NPY_UNUSED(ap), PyArrayObject* src)
+{
+    PyObject *obj;
+    memcpy(&obj, ip, sizeof(obj));
+    if (obj == NULL) {
+        /* We support NULL, but still try to guarantee this never happens! */
+        Py_RETURN_NONE;
+    }
+    else {
+        PyRegion_AddRef(src, obj);
+        Py_INCREF(obj);
+        return obj;
+    }
+}
+
 
 static int
 OBJECT_setitem(PyArray_Descr *descr, PyObject *op, char *ov)
@@ -4167,6 +4183,11 @@ static PyArray_ArrFuncs _Py@NAME@_ArrFuncs = {
         @from@_to_VOID
     },
     @from@_getitem,
+    #if @from@ == OBJECT
+    OBJECT_getitem2,   // <-- add this
+    #else
+        NULL,
+    #endif
     @from@_legacy_setitem,
     (PyArray_CopySwapNFunc*)@from@_copyswapn,
     (PyArray_CopySwapFunc*)@from@_copyswap,

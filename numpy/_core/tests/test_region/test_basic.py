@@ -42,11 +42,13 @@ class TestBuildWithArray(unittest.TestCase):
         arr = np.array([r.a, r.b, r.c], dtype=object)
         self.assertEqual(r._lrc, original_lrc+3)
         r.arr = arr
-        self.assertEqual(r._lrc, original_lrc)
+        self.assertEqual(r._lrc, original_lrc+1) # arr still points into the region
         r.arr = None
-        self.assertEqual(r._lrc, original_lrc)
+        self.assertEqual(r._lrc, original_lrc+1) # arr still points into the region
+        arr = None
+        self.assertEqual(r._lrc, original_lrc) # arr is freed.
 
-    @unittest.skip("This test currently fails because the array's reference to the region's objects is not being tracked. This is a known issue that needs to be addressed.")
+    # @unittest.skip("This test currently fails because the array's reference to the region's objects is not being tracked. This is a known issue that needs to be addressed.")
     def test_array_creation_with_external_ref(self):
         r = Region()
         r.a = self.A()

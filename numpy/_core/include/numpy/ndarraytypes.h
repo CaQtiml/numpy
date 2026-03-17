@@ -419,6 +419,7 @@ struct _PyArray_Descr;
 
 /* These must deal with unaligned and swapped data if necessary */
 typedef PyObject * (PyArray_GetItemFunc) (void *, void *);
+typedef PyObject * (PyArray_GetItemFunc2) (void *, void *, void *); // Although being PyArrayObject* at the third argument, we cannot use it now since it is defined later. It is okay since this is only used in this file. Not a precise type is okay.
 typedef int (PyArray_SetItemFunc)(PyObject *, void *, void *);
 
 typedef void (PyArray_CopySwapNFunc)(void *, npy_intp, void *, npy_intp,
@@ -481,6 +482,7 @@ typedef struct {
          * -- not array scalars
          */
         PyArray_GetItemFunc *getitem;
+        PyArray_GetItemFunc2 *getitem2;
         PyArray_SetItemFunc *setitem;
 
         /*

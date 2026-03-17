@@ -506,7 +506,7 @@ PyArray_Scalar(void *data, PyArray_Descr *descr, PyObject *base)
         PyArrayScalar_RETURN_BOOL_FROM_LONG(*(npy_bool*)data);
     }
     else if (PyDataType_FLAGCHK(descr, NPY_USE_GETITEM)) {
-        return PyDataType_GetArrFuncs(descr)->getitem(data, base);
+        return PyDataType_GetArrFuncs(descr)->getitem2(data, base, (PyArrayObject *)base);
     }
     itemsize = descr->elsize;
     copyswap = PyDataType_GetArrFuncs(descr)->copyswap;
