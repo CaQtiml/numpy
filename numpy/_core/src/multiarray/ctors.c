@@ -534,7 +534,9 @@ PyArray_AssignFromCache_Recursive(
                 goto finish_critical_section;
             }
             else {
-                Py_XSETREF(item_pyvalue, Py_NewRef(PySequence_Fast_GET_ITEM(obj, i)));
+                PyObject* result_get_item = PySequence_Fast_GET_ITEM(obj, i);
+                PyRegion_XSETLOCALNEWREF(item_pyvalue, result_get_item);
+                // Py_XSETREF(item_pyvalue, Py_NewRef(PySequence_Fast_GET_ITEM(obj, i)));
             }
 
             if (ndim == depth + 1) {
@@ -581,7 +583,9 @@ PyArray_AssignFromCache_Recursive(
     ret = 0;
 
   finish:;
+    PyRegion_RemoveLocalRef(item_pyvalue);
     Py_XDECREF(item_pyvalue);
+    PyRegion_RemoveLocalRef(obj);
     Py_DECREF(obj);
     return ret;
 }
@@ -1002,7 +1006,9 @@ PyArray_NewFromDescr_int(
 
  fail:
     NPY_traverse_info_xfree(&fill_zero_info);
+    PyRegion_RemoveRef(fa, fa->mem_handler);
     Py_XDECREF(fa->mem_handler);
+    assert(PyRegion_IsLocal(fa));
     Py_DECREF(fa);
     return NULL;
 }

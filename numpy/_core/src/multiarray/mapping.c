@@ -930,6 +930,9 @@ get_view_from_index(PyArrayObject *self, PyArrayObject **view,
     }
 
     /* Create the new view and set the base array */
+    if(PyRegion_AddLocalRef(PyArray_DESCR(self))) {
+        return -1;
+    }
     Py_INCREF(PyArray_DESCR(self));
     *view = (PyArrayObject *)PyArray_NewFromDescr_int(
             ensure_array ? &PyArray_Type : Py_TYPE(self),
@@ -1583,6 +1586,7 @@ array_subscript(PyArrayObject *self, PyObject *op)
     /* If there is no fancy indexing, we have the result */
     if (!(index_type & HAS_FANCY)) {
         result = (PyObject *)view;
+        PyRegion_AddLocalRef(result);
         Py_INCREF(result);
         goto finish;
     }
@@ -1756,10 +1760,13 @@ array_subscript(PyArrayObject *self, PyObject *op)
 
   finish:
     NPY_cast_info_xfree(&cast_info);
+    PyRegion_RemoveLocalRef(mit);
+    PyRegion_RemoveLocalRef(view);
     Py_XDECREF(mit);
     Py_XDECREF(view);
     /* Clean up indices */
     for (i=0; i < index_num; i++) {
+        PyRegion_RemoveLocalRef(indices[i].object);
         Py_XDECREF(indices[i].object);
     }
     return result;

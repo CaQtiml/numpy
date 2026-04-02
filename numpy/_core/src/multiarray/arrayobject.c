@@ -213,11 +213,9 @@ PyArray_SetBaseObject(PyArrayObject *arr, PyObject *obj)
             PyRegion_RemoveLocalRef(obj);
             return -1;
         }
-            
-
         Py_INCREF(tmp);
-        Py_DECREF(obj);
         PyRegion_RemoveLocalRef(obj);
+        Py_DECREF(obj);
         obj = tmp;
     }
 
@@ -236,7 +234,6 @@ PyArray_SetBaseObject(PyArrayObject *arr, PyObject *obj)
         Py_DECREF(obj);
         return -1;
     }
-
     ((PyArrayObject_fields *)arr)->base = obj;
 
     return 0;
@@ -426,6 +423,9 @@ _clear_array_attributes(PyArrayObject *self, npy_bool unraisable)
              * prevent reaching 0 twice and thus recursing into dealloc.
              * Increasing sys.gettotalrefcount, but path should not be taken.
              */
+            if(PyRegion_AddLocalRef(self)) {
+                return -1;
+            }
             Py_INCREF(self);
             retval = PyArray_ResolveWritebackIfCopy(self);
             if (write_and_clear_error_if_unraisable(retval, unraisable) < 0) {
@@ -436,7 +436,7 @@ _clear_array_attributes(PyArrayObject *self, npy_bool unraisable)
          * If fa->base is non-NULL, it is something
          * to DECREF -- either a view or a buffer object
          */
-        PyRegion_RemoveLocalRef(fa->base);
+        PyRegion_RemoveRef(fa, fa->base);
         Py_CLEAR(fa->base);
     }
 
@@ -469,7 +469,7 @@ _clear_array_attributes(PyArrayObject *self, npy_bool unraisable)
                 nbytes = 1;
             }
             PyDataMem_UserFREE(fa->data, nbytes, fa->mem_handler);
-            PyRegion_RemoveLocalRef(fa->mem_handler);
+            // PyRegion_RemoveRef(fa, fa->mem_handler);
             Py_CLEAR(fa->mem_handler);
         }
         fa->data = NULL;
@@ -478,7 +478,7 @@ _clear_array_attributes(PyArrayObject *self, npy_bool unraisable)
     /* must match allocation in PyArray_NewFromDescr */
     npy_free_cache_dim(fa->dimensions, 2 * fa->nd);
     fa->dimensions = NULL;
-    PyRegion_RemoveLocalRef(fa->descr);
+    // PyRegion_RemoveRef(fa, fa->descr);
     Py_CLEAR(fa->descr);
     return 0;
 }
@@ -500,27 +500,24 @@ static int
 array_traverse(PyObject *self, visitproc visit, void *arg)
 {
     PyArrayObject_fields *fa = (PyArrayObject_fields *)self;
-    // printf("Called array_traverse\n");
-    
-    /* Visit the base object if it exists */
-    // Py_VISIT(fa->base);
-    
-    /* Visit the descriptor */
-    // Py_VISIT(fa->descr);  // Have a freezing problem. Ignore for now.
-    
-    /* Visit the memory handler if it exists */
-    // Py_VISIT(fa->mem_handler);
-    
-    /* If array contains Python objects, visit each element */
-    if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data) {
-        npy_intp i, n = PyArray_SIZE((PyArrayObject *)self);
-        PyObject **data = (PyObject **)fa->data;
-        
-        for (i = 0; i < n; i++) {
-            Py_VISIT(data[i]);
+
+    Py_VISIT(fa->base);
+
+    if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data && (fa->flags & NPY_ARRAY_OWNDATA)) {
+        // There is a redundant travel to the objects that are pointed by "base" and "view", which those should be traversed one time only
+        // (fa->flags & NPY_ARRAY_OWNDATA) handles this
+        PyArrayIterObject *it = (PyArrayIterObject *)PyArray_IterNew(self);
+        if (it == NULL) {
+            return -1;
         }
+        while (it->index < it->size) {
+            PyObject *obj = *(PyObject **)it->dataptr;
+            Py_VISIT(obj);
+            PyArray_ITER_NEXT(it);
+        }
+        Py_DECREF(it);
     }
-    
+
     return 0;
 }
 
@@ -1321,4 +1318,5 @@ NPY_NO_EXPORT PyTypeObject PyArray_Type = {
     .tp_getset = array_getsetlist,
     .tp_new = (newfunc)array_new,
     .tp_traverse = (traverseproc)array_traverse,
+    // .tp_clear = (inquiry)array_clear,
 };

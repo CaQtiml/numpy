@@ -893,6 +893,7 @@ OBJECT_setitem2(PyArray_Descr *descr, PyObject *op, char *ov, PyArrayObject* src
     PyRegion_RemoveRef(src, old_value);
     Py_INCREF(op);
     /* A newly created array/buffer may only be NULLed, so XDECREF */
+    PyRegion_RemoveLocalRef(obj);
     Py_XDECREF(obj);
 
     memcpy(ov, &op, sizeof(op));
