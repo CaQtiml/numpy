@@ -37,6 +37,7 @@
 #include "dtypemeta.h"
 #include "array_method.h"
 #include "array_coercion.h"
+#include "refcount.h"
 
 #include "umathmodule.h"
 
@@ -115,11 +116,13 @@ NPY_NO_EXPORT int
 _strided_to_strided_copy_references(
         PyArrayMethod_Context *NPY_UNUSED(context), char *const *args,
         const npy_intp *dimensions, const npy_intp *strides,
-        NpyAuxData *NPY_UNUSED(auxdata))
+        NpyAuxData *auxdata)
 {
     npy_intp N = dimensions[0];
     char *src = args[0], *dst = args[1];
     npy_intp src_stride = strides[0], dst_stride = strides[1];
+    ClearArrayAuxData *d = (ClearArrayAuxData*) auxdata;
+    PyArrayObject *arr = d->arr;
 
     PyObject *src_ref = NULL, *dst_ref = NULL;
     while (N > 0) {
@@ -128,11 +131,15 @@ _strided_to_strided_copy_references(
 
         /* Copy the reference */
         NPY_DT_DBG_REFTRACE("copy src ref", src_ref);
+        if(PyRegion_AddRef(arr, src_ref)) {
+            return -1;
+        }
         memcpy(dst, &src_ref, sizeof(src_ref));
         /* Claim the reference */
         Py_XINCREF(src_ref);
         /* Release the reference in dst */
         NPY_DT_DBG_REFTRACE("dec dst ref", dst_ref);
+        PyRegion_RemoveRef(arr, dst_ref);
         Py_XDECREF(dst_ref);
 
         src += src_stride;

@@ -147,6 +147,7 @@ multi_DECREF(PyObject **objects, npy_intp n)
 {
     npy_intp i;
     for (i = 0; i < n; i++) {
+        PyRegion_RemoveLocalRef(objects[i]);
         Py_DECREF(objects[i]);
     }
 }
@@ -170,6 +171,10 @@ unpack_tuple(PyTupleObject *index, PyObject **result, npy_intp result_n)
     }
     for (i = 0; i < n; i++) {
         result[i] = PyTuple_GET_ITEM(index, i);
+        if(PyRegion_AddLocalRef(result[i])) {
+            multi_DECREF(result, i);
+            return -1;
+        }
         Py_INCREF(result[i]);
     }
     return n;
@@ -179,6 +184,9 @@ unpack_tuple(PyTupleObject *index, PyObject **result, npy_intp result_n)
 static inline npy_intp
 unpack_scalar(PyObject *index, PyObject **result, npy_intp NPY_UNUSED(result_n))
 {
+    if(PyRegion_AddLocalRef(index)) {
+        return -1;
+    }
     Py_INCREF(index);
     result[0] = index;
     return 1;
@@ -226,6 +234,7 @@ unpack_indices(PyObject *index, PyObject **result, npy_intp result_n)
             return -1;
         }
         npy_intp n = unpack_tuple(tup, result, result_n);
+        assert(PyRegion_IsLocal(tup));
         Py_DECREF(tup);
         return n;
     }
@@ -2002,7 +2011,7 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
 
     /* If there is no fancy indexing, we have the array to assign to */
     if (!(index_type & HAS_FANCY)) {
-        if (PyArray_CopyObject(view, op) < 0) {
+        if (PyArray_CopyObject2(self, view, op) < 0) {
             goto fail;
         }
         goto success;
@@ -2227,11 +2236,14 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
     return -1;
 
   success:
+    PyRegion_RemoveLocalRef((PyObject *)view);
+    PyRegion_RemoveLocalRef((PyObject *)tmp_arr);
     Py_XDECREF((PyObject *)view);
     Py_XDECREF((PyObject *)tmp_arr);
     NPY_cast_info_xfree(&cast_info);
 
     for (i=0; i < index_num; i++) {
+        PyRegion_RemoveLocalRef(indices[i].object);
         Py_XDECREF(indices[i].object);
     }
     return 0;

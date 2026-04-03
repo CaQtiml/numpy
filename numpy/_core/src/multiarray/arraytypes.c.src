@@ -890,10 +890,9 @@ OBJECT_setitem2(PyArray_Descr *descr, PyObject *op, char *ov, PyArrayObject* src
     if (PyRegion_AddRef(src, op)) {
         return -1;
     }
-    PyRegion_RemoveRef(src, old_value);
     Py_INCREF(op);
     /* A newly created array/buffer may only be NULLed, so XDECREF */
-    PyRegion_RemoveLocalRef(obj);
+    PyRegion_RemoveRef(src, obj);
     Py_XDECREF(obj);
 
     memcpy(ov, &op, sizeof(op));
@@ -995,6 +994,7 @@ VOID_getitem(void *input, void *vap)
 
 
 NPY_NO_EXPORT int PyArray_CopyObject(PyArrayObject *, PyObject *);
+NPY_NO_EXPORT int PyArray_CopyObject2(PyArrayObject*, PyArrayObject *, PyObject *);
 
 /* Given a structured PyArrayObject arr, index i and structured datatype descr,
  * modify the dtype of arr to contain a single field corresponding to the ith

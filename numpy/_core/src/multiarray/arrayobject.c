@@ -332,6 +332,97 @@ PyArray_CopyObject(PyArrayObject *dest, PyObject *src_object)
     return -1;
 }
 
+NPY_NO_EXPORT int
+PyArray_CopyObject2(PyArrayObject* self, PyArrayObject *dest, PyObject *src_object)
+{
+    int ret = 0;
+    PyArrayObject *view;
+    PyArray_Descr *dtype = NULL;
+    int ndim;
+    npy_intp dims[NPY_MAXDIMS];
+    coercion_cache_obj *cache = NULL;
+    ClearArrayAuxData *auxdata = PyMem_Malloc(sizeof(ClearArrayAuxData));
+    if (auxdata == NULL) {
+        return -1;
+    }
+    auxdata->base.free = clear_array_auxdata_free;
+    auxdata->base.clone = NULL;
+    auxdata->arr = self;
+
+    /*
+     * We have to set the maximum number of dimensions here to support
+     * sequences within object arrays.
+     */
+    ndim = PyArray_DiscoverDTypeAndShape(src_object,
+            PyArray_NDIM(dest), dims, &cache,
+            NPY_DTYPE(PyArray_DESCR(dest)), PyArray_DESCR(dest), &dtype, -1, NULL);
+    if (ndim < 0) {
+        return -1;
+    }
+
+    if (cache != NULL && !(cache->sequence)) {
+        /* The input is an array or array object, so assign directly */
+        assert(cache->converted_obj == src_object);
+        view = (PyArrayObject *)cache->arr_or_sequence;
+        Py_DECREF(dtype);
+        ret = PyArray_AssignArray2(self, dest, view, NULL, NPY_UNSAFE_CASTING, auxdata);
+        npy_free_coercion_cache(cache);
+        return ret;
+    }
+
+    /*
+     * We may need to broadcast, due to shape mismatches, in this case
+     * create a temporary array first, and assign that after filling
+     * it from the sequences/scalar.
+     */
+    if (ndim != PyArray_NDIM(dest) ||
+            !PyArray_CompareLists(PyArray_DIMS(dest), dims, ndim)) {
+        /*
+         * Broadcasting may be necessary, so assign to a view first.
+         * This branch could lead to a shape mismatch error later.
+         */
+        assert (ndim <= PyArray_NDIM(dest));  /* would error during discovery */
+        view = (PyArrayObject *) PyArray_NewFromDescr(
+                &PyArray_Type, dtype, ndim, dims, NULL, NULL,
+                PyArray_FLAGS(dest) & NPY_ARRAY_F_CONTIGUOUS, NULL);
+        if (view == NULL) {
+            npy_free_coercion_cache(cache);
+            return -1;
+        }
+    }
+    else {
+        Py_DECREF(dtype);
+        view = dest;
+    }
+
+    /* Assign the values to `view` (whichever array that is) */
+    if (cache == NULL) {
+        /* single (non-array) item, assign immediately */
+        if (PyArray_Pack(
+                PyArray_DESCR(view), PyArray_DATA(view), src_object) < 0) {
+            goto fail;
+        }
+    }
+    else {
+        if (PyArray_AssignFromCache(view, cache) < 0) {
+            goto fail;
+        }
+    }
+    if (view == dest) {
+        return 0;
+    }
+
+    ret = PyArray_AssignArray2(self, dest, view, NULL, NPY_UNSAFE_CASTING);
+    Py_DECREF(view);
+    return ret;
+
+  fail:
+    if (view != dest) {
+        Py_DECREF(view);
+    }
+    return -1;
+}
+
 
 /*NUMPY_API
  *
