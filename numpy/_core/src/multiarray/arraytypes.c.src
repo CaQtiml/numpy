@@ -851,13 +851,16 @@ static PyObject *
 OBJECT_getitem2(void *ip, void *NPY_UNUSED(ap), PyArrayObject* src)
 {
     PyObject *obj;
+    /* EXPECT to be equivalent to obj = *(PyObject **)ip; (Need Proof) */
     memcpy(&obj, ip, sizeof(obj));
     if (obj == NULL) {
         /* We support NULL, but still try to guarantee this never happens! */
         Py_RETURN_NONE;
     }
     else {
-        PyRegion_AddRef(src, obj);
+        if(PyRegion_AddLocalRef(obj)){
+            Py_RETURN_NONE;
+        }
         Py_INCREF(obj);
         return obj;
     }
@@ -890,12 +893,12 @@ OBJECT_setitem2(PyArray_Descr *descr, PyObject *op, char *ov, PyArrayObject* src
     if (PyRegion_AddRef(src, op)) {
         return -1;
     }
+    memcpy(ov, &op, sizeof(op));
     Py_INCREF(op);
     /* A newly created array/buffer may only be NULLed, so XDECREF */
     PyRegion_RemoveRef(src, obj);
     Py_XDECREF(obj);
 
-    memcpy(ov, &op, sizeof(op));
 
     return PyErr_Occurred() ? -1 : 0;
 }

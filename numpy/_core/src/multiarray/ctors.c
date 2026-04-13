@@ -496,6 +496,7 @@ PyArray_AssignFromCache_Recursive(
     int ret = -1;
     /* Consume first cache element by extracting information and freeing it */
     PyObject *obj = (*cache)->arr_or_sequence;
+    assert(PyRegion_IsLocal(obj));
     Py_INCREF(obj);
     npy_bool is_sequence = (*cache)->sequence;
     /*
@@ -934,6 +935,18 @@ PyArray_NewFromDescr_int(
          */
         fa->flags &= ~NPY_ARRAY_OWNDATA;
     }
+
+    // if (PyDataType_REFCHK(descr)) {
+    //     PyObject *obj_from_data = *(PyObject **)data;
+    //     if(PyRegion_AddRef(fa, obj_from_data)) {
+    //         goto fail;
+    //     }
+    //     fa->data = data;   // ← store pointer to r.b directly
+    // }
+    // else {
+    //     fa->data = data;          // ← normal case
+    // }
+
     fa->data = data;
 
     /*

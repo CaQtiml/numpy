@@ -347,7 +347,8 @@ PyArray_CopyObject2(PyArrayObject* self, PyArrayObject *dest, PyObject *src_obje
     }
     auxdata->base.free = clear_array_auxdata_free;
     auxdata->base.clone = NULL;
-    auxdata->arr = self;
+    // auxdata->arr = self;
+    auxdata->arr = PyArray_BASE(self) ? (PyArrayObject *)PyArray_BASE(self) : self;
 
     /*
      * We have to set the maximum number of dimensions here to support
@@ -595,6 +596,7 @@ array_traverse(PyObject *self, visitproc visit, void *arg)
     Py_VISIT(fa->base);
 
     if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data && (fa->flags & NPY_ARRAY_OWNDATA)) {
+    // if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data) {
         // There is a redundant travel to the objects that are pointed by "base" and "view", which those should be traversed one time only
         // (fa->flags & NPY_ARRAY_OWNDATA) handles this
         PyArrayIterObject *it = (PyArrayIterObject *)PyArray_IterNew(self);

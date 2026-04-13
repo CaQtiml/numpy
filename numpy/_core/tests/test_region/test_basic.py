@@ -1594,5 +1594,315 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         with self.assertRaises(Exception):
             r1.arr[0:1] = np.array([r2.x], dtype=object)
 
+    # ------------------------------------------------------------------
+    # Local array, local view, single element assignment
+    # ------------------------------------------------------------------
+
+    def test_assign_region_obj_through_view_increases_lrc(self):
+        """
+        view = arr[1:4]; view[0] = r.x
+        The write lands in arr's buffer. Since arr is local and the new
+        value is region-owned, LRC should increase by 1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.x = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        view = arr[1:3]
+        # view creation does not change LRC
+        self.assertEqual(r._lrc, base_lrc)
+
+        view[0] = r.x  # replaces r.b with r.x — net 0
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_assign_local_through_view_decreases_lrc(self):
+        """
+        view[0] = local replaces a region-borrowed slot with a local object.
+        LRC should drop by 1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        view = arr[0:2]
+        local = self.A()
+        view[0] = local  # replaces r.a
+        self.assertEqual(r._lrc, base_lrc - 1)
+
+        arr = None
+        view = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_assign_through_view_reflects_in_base_array(self):
+        """
+        Writing through view modifies arr's buffer. Releasing view
+        should not affect LRC (view has no independent borrow).
+        Releasing arr should release all remaining borrows.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.d = self.A()
+        base_lrc = r._lrc
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        view = arr[0:2]
+
+        local = self.A()
+        view[0] = local       # slot 0: r.a → local  (LRC -1)
+        view[1] = r.d         # slot 1: r.b → r.d    (LRC  0)
+
+        lrc_after = r._lrc
+        self.assertEqual(lrc_after, base_lrc + 3 - 1)  # lost r.a borrow
+
+        view = None
+        self.assertEqual(r._lrc, lrc_after)  # view release changes nothing
+
+        arr = None
+        # arr held: local(slot0 — no borrow), r.d(slot1), r.c(slot2)
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Local array, local view, slice assignment through view
+    # ------------------------------------------------------------------
+
+    def test_slice_assign_through_view_same_region(self):
+        """
+        view[0:2] = [r.x, r.y] over existing region slots — net LRC 0.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.d = self.A()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([r.a, r.b, r.c, r.d], dtype=object)
+        base_lrc = r._lrc  # borrows 4
+
+        view = arr[0:2]
+        view[0:2] = np.array([r.x, r.y], dtype=object)
+        self.assertEqual(r._lrc, base_lrc)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc-4)
+
+    def test_slice_assign_locals_through_view(self):
+        """
+        view[0:2] = locals over region slots decreases LRC by 2.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.d = self.A()
+
+        arr = np.array([r.a, r.b, r.c, r.d], dtype=object)
+        base_lrc = r._lrc  # borrows 4
+
+        view = arr[1:3]  # covers r.b, r.c
+        view[0:2] = np.array([self.A(), self.A()], dtype=object)
+        self.assertEqual(r._lrc, base_lrc - 2)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 2) 
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc - 4)
+
+    def test_slice_assign_region_through_view_over_locals(self):
+        """
+        view[0:2] = region_values over local slots increases LRC by 2.
+        """
+        r = Region()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc  # 0 borrows
+
+        view = arr[0:2]
+        view[0:2] = np.array([r.x, r.y], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc + 2)
+        view = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Region-owned array, local view, assignment through view
+    # ------------------------------------------------------------------
+
+    def test_assign_local_through_view_of_region_array_increases_lrc(self):
+        """
+        r.arr is region-owned. view = r.arr[0:2] (local, LRC +1).
+        view[0] = local writes a local into r.arr's buffer.
+        The region now holds a reference to local: LRC +1 more.
+        The view itself still accounts for +1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = r.arr[0:2]
+        self.assertEqual(r._lrc, base_lrc + 1)  # view is local ref to region
+
+        local = self.A()
+        view[0] = local  # r.arr[0]: r.a → local, region holds local now
+        self.assertEqual(r._lrc, base_lrc + 2)  # +1 view, +1 local in region
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc + 1)  # view gone, local still in region
+
+        local = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_assign_region_obj_through_view_of_region_array_no_lrc_change(self):
+        """
+        view = r.arr[0:2]; view[0] = r.d
+        Replaces one region object with another in r.arr's buffer.
+        Net LRC change from the write: 0. View borrow remains +1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.d = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = r.arr[0:2]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        view[0] = r.d  # r.a → r.d, same region, net 0
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_assign_cross_region_through_view_of_region_array_raises(self):
+        """
+        view = r1.arr[0:2]; view[0] = r2.x should raise — writing a
+        foreign-region object into r1's buffer via a view.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[0:2]
+        with self.assertRaises(Exception):
+            view[0] = r2.x
+
+    def test_assign_cross_region_through_view_lrc_stable_after_failure(self):
+        """
+        After a failed cross-region write through a view, both regions'
+        LRCs should be unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[0:2]
+        base_lrc1 = r1._lrc  # base + 1 for view
+        base_lrc2 = r2._lrc
+
+        try:
+            view[0] = r2.x
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+    def test_slice_assign_through_view_of_region_array_locals(self):
+        """
+        view[0:2] = [local1, local2] into r.arr's buffer via a local view.
+        Each local written in increases LRC by 1.
+        Releasing locals decreases LRC one by one.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        local1 = self.A()
+        local2 = self.A()
+        view = r.arr[0:2]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        view[0:2] = np.array([local1, local2], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 3)  # +1 view, +2 locals in region
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc + 2)  # view gone, 2 locals remain
+
+        local1 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        local2 = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Overlapping views writing to the same buffer
+    # ------------------------------------------------------------------
+
+    def test_two_views_writing_to_overlapping_slots(self):
+        """
+        view1 = arr[0:3], view2 = arr[1:4] — overlapping.
+        Writing through view1 then view2 into shared slots should not
+        double-count LRC. Each slot's borrow reflects the last write.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.d = self.A()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([r.a, r.b, r.c, r.d], dtype=object)
+        base_lrc = r._lrc  # borrows 4
+
+        view1 = arr[0:3]
+        view2 = arr[1:4]
+
+        local = self.A()
+        view1[1] = local      # arr[1]: r.b → local  (LRC -1)
+        self.assertEqual(r._lrc, base_lrc - 1)
+
+        view2[0] = r.x        # arr[1]: local → r.x  (LRC +1, back to base)
+        self.assertEqual(r._lrc, base_lrc)
+
+        view1 = None
+        view2 = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 4)
+
 if __name__ == "__main__":
     unittest.main()

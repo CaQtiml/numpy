@@ -1545,6 +1545,9 @@ array_subscript(PyArrayObject *self, PyObject *op)
         result = (PyObject *) PyArray_Scalar(item, PyArray_DESCR(self),
                                              (PyObject *)self);
         /* Because the index is full integer, we do not need to decref */
+        // if(PyRegion_TakeRef(self, result)) {
+        //     return NULL;
+        // }
         return result;
     }
 
@@ -1595,7 +1598,9 @@ array_subscript(PyArrayObject *self, PyObject *op)
     /* If there is no fancy indexing, we have the result */
     if (!(index_type & HAS_FANCY)) {
         result = (PyObject *)view;
-        PyRegion_AddLocalRef(result);
+        if(PyRegion_AddLocalRef(result)) {
+            return NULL;
+        }
         Py_INCREF(result);
         goto finish;
     }
@@ -1904,6 +1909,7 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
         if (PyDataType_FLAGCHK(PyArray_DESCR(self), NPY_ITEM_REFCOUNT)) {
             PyObject **obj_ptr = (PyObject **)item;
             PyObject* old_value = *obj_ptr;
+            PyArrayObject *base_arr = PyArray_BASE(self) ? (PyArrayObject *)PyArray_BASE(self) : self;
 
             // ============ PRINT OLD VALUE ============
             // if (old_value != NULL) {
@@ -1918,7 +1924,7 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
             // }
             // =========================================
             // printf("Before Entering PyArray_Pack_DuckTape\n");
-            if (PyArray_Pack_DuckTape(self, old_value, PyArray_DESCR(self), item, op) < 0) {
+            if (PyArray_Pack_DuckTape(base_arr, old_value, PyArray_DESCR(self), item, op) < 0) {
                 return -1;
             }
         }
