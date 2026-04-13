@@ -308,6 +308,29 @@ class TestRegionNumpyView(unittest.TestCase):
 
         view = None
         self.assertEqual(r._lrc, base_lrc - 6 + 2 - 1)
+
+    def test_view_moved_into_region_adjusts_lrc_2(self):
+        """
+        
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.d = self.A()
+        r.e = self.A()
+        r.f = self.A()
+
+        r.arr = np.array([r.a, r.b, r.c, r.d, r.e, r.f], dtype=object)
+        base_lrc = r._lrc
+        view = r.arr[1:4]
+        self.assertEqual(r._lrc, base_lrc + 1) # only view->base to r.arr, so +1
+
+        r.view = view
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc)
     
     def test_view_moved_into_region_adjusts_lrc_several_views(self):
         """
@@ -457,6 +480,522 @@ class TestRegionNumpyViewWithArrayInRegion(unittest.TestCase):
 
         view2 = None
         self.assertEqual(r._lrc, base_lrc)
+
+class TestArraySubscriptEllipsis(unittest.TestCase):
+    """
+    Tests for array_subscript via HAS_ELLIPSIS path.
+    arr[...] returns a view of self — no new buffer, no independent borrow.
+    """
+
+    def setUp(self):
+        class A: pass
+        freeze(A())
+        self.A = A
+
+    def test_ellipsis_get_does_not_change_lrc(self):
+        """
+        arr[...] produces a view of self. Since the view shares the same
+        buffer and is not independently borrowing from the region, LRC
+        should not change.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # arr borrows 3
+
+        view = arr[...]
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_ellipsis_view_release_does_not_change_lrc(self):
+        """
+        Releasing the ellipsis view should not change LRC since the view
+        was not independently borrowing from the region.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        view = arr[...]
+        base_lrc = r._lrc
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_ellipsis_view_arr_none_keeps_lrc_until_view_released(self):
+        """
+        arr[...] shares the buffer with arr. Setting arr to None while
+        view still exists should keep the buffer alive (and the borrows),
+        just like a slice view.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        base_lrc = r._lrc
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        view = arr[...]
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc + 3)  # view keeps buffer alive
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_ellipsis_view_both_none_releases_lrc(self):
+        """
+        Once both arr and the ellipsis view are released, LRC should
+        return to the pre-array baseline.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        base_lrc = r._lrc
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        view = arr[...]
+
+        view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_ellipsis_on_region_array_increases_lrc(self):
+        """
+        Taking arr[...] of an array already inside a region produces a
+        local view object that points into the region — LRC increases by 1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = r.arr[...]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+    def test_ellipsis_on_region_array_release_decreases_lrc(self):
+        """
+        Releasing a local ellipsis view of a region-owned array should
+        bring LRC back down by 1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = r.arr[...]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_ellipsis_on_region_array_moved_into_same_region_no_lrc_change(self):
+        """
+        Moving the ellipsis view into the same region that owns the array
+        should not change LRC — both the view and its base are owned.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = r.arr[...]
+        r.view = view
+        view = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_ellipsis_on_region_array_moved_into_other_region_raises(self):
+        """
+        Moving the ellipsis view of r1's array into r2 should raise a
+        region isolation violation.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        with self.assertRaises(Exception):
+            r2.view = r1.arr[...]
+
+    def test_multiple_ellipsis_views_lrc_additive(self):
+        """
+        Each local ellipsis view of a region-owned array adds 1 to LRC.
+        Releasing them decrements one at a time.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.arr = np.array([r.a, r.b], dtype=object)
+        base_lrc = r._lrc
+
+        view1 = r.arr[...]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        view2 = r.arr[...]
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        view1 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        view2 = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_ellipsis_assign_same_region_objects_no_lrc_change(self):
+        """
+        arr[...] = values where both arr and values come from the same
+        region should leave LRC unchanged (old borrows released,
+        new borrows acquired, net zero).
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.d = self.A()
+        r.e = self.A()
+        r.f = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        arr[...] = np.array([r.d, r.e, r.f], dtype=object)
+        self.assertEqual(r._lrc, base_lrc)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_ellipsis_assign_locals_over_region_decreases_lrc(self):
+        """
+        arr[...] = local_values replaces all region borrows with locals,
+        so LRC should drop by the full array length.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        arr[...] = np.array([self.A(), self.A(), self.A()], dtype=object)
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_ellipsis_assign_region_over_locals_increases_lrc(self):
+        """
+        arr[...] = region_values over an array of locals should raise
+        LRC by the full array length.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc  # 0 borrows
+
+        arr[...] = np.array([r.a, r.b, r.c], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 3)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+class TestArraySubscriptHasInteger(unittest.TestCase):
+    """
+    Tests for array_subscript via HAS_INTEGER path.
+    A full integer index returns a scalar (PyArray_Scalar), not a view.
+    The scalar holds a reference into the region buffer, so LRC increases.
+    """
+
+    def setUp(self):
+        class A: pass
+        freeze(A())
+        self.A = A
+
+    # @unittest.expectedFailure
+    # ("Have not handled the barrier to PyArray_Scalar")
+    def test_scalar_get_increases_lrc(self):
+        """
+        arr[i] on a 1-d object array returns the object directly.
+        This creates a new local reference into the region — LRC +1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        item = arr[0]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+    # @unittest.expectedFailure
+    # ("Have not handled the barrier to PyArray_Scalar")
+    def test_scalar_get_release_decreases_lrc(self):
+        """
+        Releasing the extracted item should bring LRC back to the
+        post-array baseline.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        item = arr[0]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        item = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # @unittest.expectedFailure
+    # ("Have not handled the barrier to PyArray_Scalar")
+    def test_multiple_scalar_gets_accumulate_lrc(self):
+        """
+        Each individual element extraction adds 1 to LRC.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        item0 = arr[0]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        item1 = arr[1]
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        item2 = arr[2]
+        self.assertEqual(r._lrc, base_lrc + 3)
+
+        item0 = None
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        item1 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        item2 = None
+        self.assertEqual(r._lrc, base_lrc)
+    
+    def test_multiple_scalar_gets_accumulate_lrc_2(self):
+        """
+        Each individual element extraction adds 1 to LRC.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        item0 = arr[0]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        r.item1 = arr[1]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        item2 = arr[2]
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        item0 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        r.item1 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        item2 = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_scalar_get_from_local_element_does_not_change_lrc(self):
+        """
+        Extracting an element that is a local object (not region-owned)
+        should not affect the region's LRC.
+        """
+        r = Region()
+        r.a = self.A()
+        local = self.A()
+
+        arr = np.array([r.a, local], dtype=object)
+        base_lrc = r._lrc  # borrows 1 (only r.a)
+
+        item = arr[1]  # local object
+        self.assertEqual(r._lrc, base_lrc)
+
+        item = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_scalar_get_from_region_array_increases_lrc(self):
+        """
+        Extracting an element from a region-owned array produces a local
+        reference.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.arr = np.array([r.a, r.b], dtype=object)
+        base_lrc = r._lrc
+
+        item = r.arr[0]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+    def test_scalar_get_from_region_array_release_decreases_lrc(self):
+        """
+        Releasing a locally extracted element of a region-owned array
+        should bring LRC back down by 1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.arr = np.array([r.a, r.b], dtype=object)
+        base_lrc = r._lrc
+
+        item = r.arr[0]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        item = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_scalar_get_arr_released_before_item_local(self):
+        """
+        Releasing arr while item still holds the extracted object should
+        keep LRC elevated (item holds the buffer alive indirectly).
+        After item is also released, LRC returns to baseline.
+        """
+        r = Region()
+        a = self.A()
+        b = self.A()
+        c = self.A()
+        base_lrc = r._lrc
+
+        arr = np.array([a, b, c], dtype=object)
+        item = arr[1]
+
+        arr = None
+        # item keeps r.b (and therefore the buffer) alive
+        self.assertEqual(r._lrc, base_lrc)
+
+        item = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # @unittest.expectedFailure
+    # ("Have not handled the barrier to PyArray_Scalar")
+    def test_scalar_get_arr_released_before_item(self):
+        """
+        Releasing arr while item still holds the extracted object should
+        keep LRC elevated (item holds the buffer alive indirectly).
+        After item is also released, LRC returns to baseline.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        base_lrc = r._lrc
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        item = arr[1]
+
+        arr = None
+        # item keeps r.b (and therefore the buffer) alive
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        item = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # @unittest.expectedFailure
+    # ("Have not handled the barrier to PyArray_Scalar")
+    def test_scalar_get_negative_index(self):
+        """
+        Negative indices are normalised by check_and_adjust_index.
+        The extracted object should still produce the correct LRC +1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        item = arr[-1]  # normalises to index 2 → r.c
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        item = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # @unittest.expectedFailure
+    # ("Have not handled the barrier to PyArray_Scalar")
+    def test_scalar_get_same_object_twice_accumulates_lrc(self):
+        """
+        Extracting the same slot twice should add 2 to LRC, since each
+        extraction is an independent local reference.
+        """
+        r = Region()
+        r.a = self.A()
+
+        arr = np.array([r.a], dtype=object)
+        base_lrc = r._lrc  # borrows 1
+
+        ref1 = arr[0]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        ref2 = arr[0]
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        ref1 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        ref2 = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_scalar_get_into_other_region_raises(self):
+        """
+        Storing an extracted element from r1's array directly into r2
+        should raise a region isolation violation.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.arr = np.array([r1.a], dtype=object)
+
+        with self.assertRaises(Exception):
+            r2.stolen = r1.arr[0]
+
+    def test_scalar_get_into_other_region_raises_slice(self):
+        """
+        Storing an extracted element from r1's array directly into r2
+        should raise a region isolation violation.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.c = self.A()
+        r1.d = self.A()
+        r1.e = self.A()
+        r1.arr = np.array([r1.a, r1.b, r1.c, r1.d, r1.e], dtype=object)
+
+        with self.assertRaises(Exception):
+            r2.stolen = r1.arr[1:3]
 
 # ------------- Test array_ass_subscript ---------------------------------
 
@@ -871,6 +1410,189 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         arr = None
         self.assertEqual(r1._lrc, base_lrc1 - 1)
         self.assertEqual(r2._lrc, base_lrc2)
+    
+    # ------------------------------------------------------------------
+    # HAS_ELLIPSIS assign on region-owned array
+    # ------------------------------------------------------------------
+
+    @unittest.expectedFailure
+    # ("Have not handled ellipsis assignment to region array with same-region values")
+    def test_ellipsis_assign_same_region_on_region_array(self):
+        """
+        r.arr[...] = same-region values: CopyObject(self, op) where both
+        sides are owned by the same region. Net LRC unchanged.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.d = self.A()
+        r.e = self.A()
+        r.f = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        r.arr[...] = np.array([r.d, r.e, r.f], dtype=object)
+        self.assertEqual(r._lrc, base_lrc)
+
+    @unittest.expectedFailure
+    # ("Have not handled ellipsis assignment to region array with local values")
+    def test_ellipsis_assign_locals_over_region_array(self):
+        """
+        r.arr[...] = local_values: each slot in r.arr previously held a
+        region object (no external borrow). After assignment each slot holds
+        a local, so LRC rises by the array length (region now references locals).
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        local1 = self.A()
+        local2 = self.A()
+        local3 = self.A()
+        r.arr[...] = np.array([local1, local2, local3], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 3)
+
+        local1 = None
+        self.assertEqual(r._lrc, base_lrc + 2)
+        local2 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+        local3 = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    @unittest.expectedFailure
+    # ("Have not handled ellipsis assignment to region array over local values")
+    def test_ellipsis_assign_region_over_local_slots_in_region_array(self):
+        """
+        r.arr[...] = region_values where r.arr previously held locals:
+        each slot releases a local borrow and acquires a region-owned object.
+        LRC drops by the number of locals replaced.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        local1 = self.A()
+        local2 = self.A()
+        r.arr = np.array([local1, local2], dtype=object)
+        base_lrc = r._lrc  # +2 for the two locals held inside region
+
+        r.arr[...] = np.array([r.a, r.b], dtype=object)
+        self.assertEqual(r._lrc, base_lrc) # object pointed by local1 and local2 are still in the region, so LRC should not change
+
+    def test_ellipsis_assign_cross_region_into_region_array_raises(self):
+        """
+        r1.arr[...] = r2_values should raise a region isolation violation
+        since CopyObject would write r2-owned objects into r1's array.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        with self.assertRaises(Exception):
+            r1.arr[...] = np.array([r2.x, r2.y], dtype=object)
+
+    def test_ellipsis_assign_on_region_array_lrc_stable_after_failed_cross_region(self):
+        """
+        After a failed cross-region ellipsis assignment the region's LRC
+        should be unchanged — no partial borrow should have been applied.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        try:
+            r1.arr[...] = np.array([r2.x, r2.y], dtype=object)
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+    # ------------------------------------------------------------------
+    # HAS_SLICE assign cross-region violation
+    # ------------------------------------------------------------------
+
+    def test_slice_assign_cross_region_into_region_array_raises(self):
+        """
+        r1.arr[0:2] = r2_values should raise a region isolation violation.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        with self.assertRaises(Exception):
+            r1.arr[0:2] = np.array([r2.x, r2.y], dtype=object)
+
+    def test_slice_assign_partial_cross_region_raises(self):
+        """
+        Assigning r2 objects into a partial slice of r1's array should
+        raise, even when only a subset of slots are targeted.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.c = self.A()
+        r2.x = self.A()
+        r1.arr = np.array([r1.a, r1.b, r1.c], dtype=object)
+
+        with self.assertRaises(Exception):
+            r1.arr[1:2] = np.array([r2.x], dtype=object)
+
+    def test_slice_assign_cross_region_lrc_stable_after_failure(self):
+        """
+        After a failed cross-region slice assignment, both regions' LRCs
+        should be unchanged — no partial borrow should have leaked.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        try:
+            r1.arr[0:2] = np.array([r2.x, r2.y], dtype=object)
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+    def test_slice_assign_cross_region_single_element_slice_raises(self):
+        """
+        Even a one-element slice `r1.arr[0:1] = [r2.x]` should raise —
+        the violation is on the value being from a different region,
+        not on the slice width.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.arr = np.array([r1.a], dtype=object)
+        r2.x = self.A()
+
+        with self.assertRaises(Exception):
+            r1.arr[0:1] = np.array([r2.x], dtype=object)
 
 if __name__ == "__main__":
     unittest.main()
