@@ -341,14 +341,16 @@ PyArray_CopyObject2(PyArrayObject* self, PyArrayObject *dest, PyObject *src_obje
     int ndim;
     npy_intp dims[NPY_MAXDIMS];
     coercion_cache_obj *cache = NULL;
-    ClearArrayAuxData *auxdata = PyMem_Malloc(sizeof(ClearArrayAuxData));
+    MyTransferAuxData *auxdata = PyMem_Malloc(sizeof(MyTransferAuxData));
     if (auxdata == NULL) {
         return -1;
     }
-    auxdata->base.free = clear_array_auxdata_free;
+    auxdata->base.free = my_transfer_auxdata_free;
     auxdata->base.clone = NULL;
     // auxdata->arr = self;
-    auxdata->arr = PyArray_BASE(self) ? (PyArrayObject *)PyArray_BASE(self) : self;
+    auxdata->base_arr = PyArray_BASE(self) ? (PyArrayObject *)PyArray_BASE(self) : self;
+    auxdata->src_arr = NULL;
+    auxdata->dst_arr = dest;
 
     /*
      * We have to set the maximum number of dimensions here to support
@@ -361,11 +363,13 @@ PyArray_CopyObject2(PyArrayObject* self, PyArrayObject *dest, PyObject *src_obje
         return -1;
     }
 
+    // cache != NULL means RHS of the assignment is a sequence. cache->sequence == 0 means RHS is an numpy array or array-like. cache->sequence == 1 means RHS is a sequence that needs to be iterated over to assign to the array, such as Python list and tuple.
     if (cache != NULL && !(cache->sequence)) {
         /* The input is an array or array object, so assign directly */
         assert(cache->converted_obj == src_object);
         view = (PyArrayObject *)cache->arr_or_sequence;
         Py_DECREF(dtype);
+        auxdata->src_arr = view;
         ret = PyArray_AssignArray2(self, dest, view, NULL, NPY_UNSAFE_CASTING, auxdata);
         npy_free_coercion_cache(cache);
         return ret;
@@ -397,6 +401,7 @@ PyArray_CopyObject2(PyArrayObject* self, PyArrayObject *dest, PyObject *src_obje
     }
 
     /* Assign the values to `view` (whichever array that is) */
+    // cache == NULL means src_object is a scalar, so we can pack directly from it. Otherwise, we need to assign from the cache, which may involve iterating over the elements if src_object is a sequence.
     if (cache == NULL) {
         /* single (non-array) item, assign immediately */
         if (PyArray_Pack(
@@ -413,12 +418,13 @@ PyArray_CopyObject2(PyArrayObject* self, PyArrayObject *dest, PyObject *src_obje
         return 0;
     }
 
-    ret = PyArray_AssignArray2(self, dest, view, NULL, NPY_UNSAFE_CASTING);
+    ret = PyArray_AssignArray(dest, view, NULL, NPY_UNSAFE_CASTING);
     Py_DECREF(view);
     return ret;
 
   fail:
     if (view != dest) {
+        PyRegion_RemoveLocalRef(view);
         Py_DECREF(view);
     }
     return -1;

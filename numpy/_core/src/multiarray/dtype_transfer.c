@@ -41,6 +41,8 @@
 
 #include "umathmodule.h"
 
+#include "arrayobject.h"
+
 #define NPY_LOWLEVEL_BUFFER_BLOCKSIZE  128
 
 /********** PRINTF DEBUG TRACING **************/
@@ -121,8 +123,10 @@ _strided_to_strided_copy_references(
     npy_intp N = dimensions[0];
     char *src = args[0], *dst = args[1];
     npy_intp src_stride = strides[0], dst_stride = strides[1];
-    ClearArrayAuxData *d = (ClearArrayAuxData*) auxdata;
-    PyArrayObject *arr = d->arr;
+    MyTransferAuxData *d = (MyTransferAuxData*) auxdata;
+    PyArrayObject *base_arr = d->base_arr;
+    PyArrayObject *src_arr = d->src_arr;
+    PyArrayObject *dst_arr = d->dst_arr;
 
     PyObject *src_ref = NULL, *dst_ref = NULL;
     while (N > 0) {
@@ -131,7 +135,7 @@ _strided_to_strided_copy_references(
 
         /* Copy the reference */
         NPY_DT_DBG_REFTRACE("copy src ref", src_ref);
-        if(PyRegion_AddRef(arr, src_ref)) {
+        if(PyRegion_AddRef(base_arr, src_ref)) {
             return -1;
         }
         memcpy(dst, &src_ref, sizeof(src_ref));
@@ -139,7 +143,7 @@ _strided_to_strided_copy_references(
         Py_XINCREF(src_ref);
         /* Release the reference in dst */
         NPY_DT_DBG_REFTRACE("dec dst ref", dst_ref);
-        PyRegion_RemoveRef(arr, dst_ref);
+        PyRegion_RemoveRef(base_arr, dst_ref);
         Py_XDECREF(dst_ref);
 
         src += src_stride;

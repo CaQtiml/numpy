@@ -1415,7 +1415,7 @@ class TestArraySubscriptAssignment(unittest.TestCase):
     # HAS_ELLIPSIS assign on region-owned array
     # ------------------------------------------------------------------
 
-    @unittest.expectedFailure
+    # @unittest.expectedFailure
     # ("Have not handled ellipsis assignment to region array with same-region values")
     def test_ellipsis_assign_same_region_on_region_array(self):
         """
@@ -1435,7 +1435,7 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         r.arr[...] = np.array([r.d, r.e, r.f], dtype=object)
         self.assertEqual(r._lrc, base_lrc)
 
-    @unittest.expectedFailure
+    # @unittest.expectedFailure
     # ("Have not handled ellipsis assignment to region array with local values")
     def test_ellipsis_assign_locals_over_region_array(self):
         """
@@ -1463,7 +1463,7 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         local3 = None
         self.assertEqual(r._lrc, base_lrc)
 
-    @unittest.expectedFailure
+    # @unittest.expectedFailure
     # ("Have not handled ellipsis assignment to region array over local values")
     def test_ellipsis_assign_region_over_local_slots_in_region_array(self):
         """

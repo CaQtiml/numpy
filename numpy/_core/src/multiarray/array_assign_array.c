@@ -181,8 +181,8 @@ fail:
 
 NPY_NO_EXPORT int
 raw_array_assign_array2(PyArrayObject* self, int ndim, npy_intp const *shape,
-        PyArray_Descr *dst_dtype, PyObject *dst_data, npy_intp const *dst_strides,
-        PyArray_Descr *src_dtype, PyObject *src_data, npy_intp const *src_strides,
+        PyArray_Descr *dst_dtype, char *dst_data, npy_intp const *dst_strides,
+        PyArray_Descr *src_dtype, char *src_data, npy_intp const *src_strides,
         int flags, NpyAuxData *auxdata)
 {
     int idim;
@@ -748,8 +748,8 @@ PyArray_AssignArray2(PyArrayObject* self, PyArrayObject *dst, PyArrayObject *src
         /* A straightforward value assignment */
         /* Do the assignment with raw array iteration */
         if (raw_array_assign_array2(self, PyArray_NDIM(dst), PyArray_DIMS(dst),
-                PyArray_DESCR(dst), (PyObject*) PyArray_DATA(dst), PyArray_STRIDES(dst),
-                PyArray_DESCR(src), (PyObject*) PyArray_DATA(src), src_strides, flags, (NpyAuxData *)auxdata) < 0){
+                PyArray_DESCR(dst), PyArray_DATA(dst), PyArray_STRIDES(dst),
+                PyArray_DESCR(src), PyArray_DATA(src), src_strides, flags, (NpyAuxData *)auxdata) < 0){
             goto fail;
         }
     }

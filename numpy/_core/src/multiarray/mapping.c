@@ -1974,6 +1974,9 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
             return 0;
         }
         /* we can just use self, but incref for error handling */
+        if(PyRegion_AddLocalRef((PyObject *)self)) {
+            return -1;
+        }
         Py_INCREF((PyObject *)self);
         view = self;
     }
@@ -2017,6 +2020,7 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
 
     /* If there is no fancy indexing, we have the array to assign to */
     if (!(index_type & HAS_FANCY)) {
+        // PyArrayObject *base_arr = PyArray_BASE(self) ? (PyArrayObject *)PyArray_BASE(self) : self;
         if (PyArray_CopyObject2(self, view, op) < 0) {
             goto fail;
         }
@@ -2231,12 +2235,16 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
 
     /* Clean up temporary variables and indices */
   fail:
+    PyRegion_RemoveLocalRef((PyObject *)view);
+    PyRegion_RemoveLocalRef((PyObject *)tmp_arr);
+    PyRegion_RemoveLocalRef((PyObject *)mit);
     Py_XDECREF((PyObject *)view);
     Py_XDECREF((PyObject *)tmp_arr);
     Py_XDECREF((PyObject *)mit);
     NPY_cast_info_xfree(&cast_info);
 
     for (i=0; i < index_num; i++) {
+        PyRegion_RemoveLocalRef(indices[i].object);
         Py_XDECREF(indices[i].object);
     }
     return -1;

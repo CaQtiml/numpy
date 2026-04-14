@@ -9,6 +9,19 @@
 extern "C" {
 #endif
 
+typedef struct {
+    NpyAuxData base;
+    PyArrayObject *base_arr;
+    PyArrayObject *src_arr;
+    PyArrayObject *dst_arr;
+} MyTransferAuxData;
+
+static void
+my_transfer_auxdata_free(NpyAuxData *self)
+{
+    PyMem_Free(self);
+}
+
 NPY_NO_EXPORT PyObject *
 _strings_richcompare(PyArrayObject *self, PyArrayObject *other, int cmp_op,
                      int rstrip);
