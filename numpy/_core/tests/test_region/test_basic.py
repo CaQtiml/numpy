@@ -1814,6 +1814,22 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         with self.assertRaises(Exception):
             view[0] = r2.x
 
+    def test_assign_cross_region_through_view_of_region_array_raises_array(self):
+        """
+        
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[0:2]
+        with self.assertRaises(Exception):
+            view[0:2] = np.array([r2.x, r2.y], dtype=object)
+
     def test_assign_cross_region_through_view_lrc_stable_after_failure(self):
         """
         After a failed cross-region write through a view, both regions'
@@ -1827,11 +1843,36 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         r1.arr = np.array([r1.a, r1.b], dtype=object)
 
         view = r1.arr[0:2]
-        base_lrc1 = r1._lrc  # base + 1 for view
+        base_lrc1 = r1._lrc
         base_lrc2 = r2._lrc
 
         try:
             view[0] = r2.x
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+    def test_assign_cross_region_through_view_lrc_stable_after_failure_array(self):
+        """
+        After a failed cross-region write through a view, both regions'
+        LRCs should be unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[0:2]
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        try:
+            view[0:2] = np.array([r2.x, r2.y], dtype=object)
         except Exception:
             pass
 
@@ -1903,6 +1944,372 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         view2 = None
         arr = None
         self.assertEqual(r._lrc, base_lrc - 4)
+    
+    # ------------------------------------------------------------------
+    # Assignment through ellipsis view (local array)
+    # ------------------------------------------------------------------
+
+    def test_has_integer_assign_through_ellipsis_view_same_region(self):
+        """
+        view = arr[...]; view[0] = r.x
+        HAS_INTEGER assign through an ellipsis view of a local array.
+        Replaces r.a with r.x — same region, net LRC 0.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.x = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        view = arr[...]
+        self.assertEqual(r._lrc, base_lrc)  # ellipsis view of local arr: no LRC change
+
+        view[0] = r.x  # r.a → r.x, same region
+        self.assertEqual(r._lrc, base_lrc)
+
+        view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_has_integer_assign_local_through_ellipsis_view(self):
+        """
+        view = arr[...]; view[0] = local
+        HAS_INTEGER assign of a local object through an ellipsis view.
+        Releases borrow on r.a — LRC -1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = arr[...]
+        local = self.A()
+        view[0] = local
+        self.assertEqual(r._lrc, base_lrc - 1)
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc - 1)  # view release has no effect
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_has_integer_assign_region_through_ellipsis_view_over_local(self):
+        """
+        view = arr[...]; view[0] = r.x where arr[0] was a local.
+        Acquires new borrow — LRC +1.
+        """
+        r = Region()
+        r.x = self.A()
+
+        arr = np.array([self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc  # 0 borrows
+
+        view = arr[...]
+        view[0] = r.x
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_has_integer_assign_cross_region_through_ellipsis_view_raises(self):
+        """
+        view = r1.arr[...]; view[0] = r2.x
+        HAS_INTEGER cross-region assign through ellipsis view of region-owned array.
+        Must raise a region isolation violation.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[...]
+        with self.assertRaises(Exception):
+            view[0] = r2.x
+
+    def test_has_integer_assign_cross_region_through_ellipsis_view_lrc_stable(self):
+        """
+        After failed HAS_INTEGER cross-region write through ellipsis view,
+        both LRCs should be unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[...]
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        try:
+            view[0] = r2.x
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+    # ------------------------------------------------------------------
+    # HAS_SLICE assign through ellipsis view
+    # ------------------------------------------------------------------
+
+    def test_has_slice_assign_through_ellipsis_view_same_region(self):
+        """
+        view = arr[...]; view[0:2] = [r.x, r.y]
+        HAS_SLICE assign through ellipsis view — same region, net LRC 0.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = arr[...]
+        view[0:2] = np.array([r.x, r.y], dtype=object)
+        self.assertEqual(r._lrc, base_lrc)
+
+        view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_has_slice_assign_locals_through_ellipsis_view(self):
+        """
+        view = arr[...]; view[0:2] = locals
+        Replaces two region borrows with locals — LRC -2.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = arr[...]
+        view[0:2] = np.array([self.A(), self.A()], dtype=object)
+        self.assertEqual(r._lrc, base_lrc - 2)
+
+        view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_has_slice_assign_region_through_ellipsis_view_over_locals(self):
+        """
+        view = arr[...]; view[0:2] = [r.x, r.y] where arr held locals.
+        Acquires two new borrows — LRC +2.
+        """
+        r = Region()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc
+
+        view = arr[...]
+        view[0:2] = np.array([r.x, r.y], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_has_slice_assign_cross_region_through_ellipsis_view_raises(self):
+        """
+        view = r1.arr[...]; view[0:2] = r2_values
+        HAS_SLICE cross-region assign through ellipsis view of region-owned array.
+        Must raise.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[...]
+        with self.assertRaises(Exception):
+            view[0:2] = np.array([r2.x, r2.y], dtype=object)
+
+    def test_has_slice_assign_cross_region_through_ellipsis_view_lrc_stable(self):
+        """
+        After failed HAS_SLICE cross-region slice write through ellipsis view,
+        both LRCs should be unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[...]
+        base_lrc1 = r1._lrc  # +1 for view
+        base_lrc2 = r2._lrc
+
+        try:
+            view[0:2] = np.array([r2.x, r2.y], dtype=object)
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+    # ------------------------------------------------------------------
+    # HAS_ELLIPSIS assign through ellipsis view (view[...] = values)
+    # ------------------------------------------------------------------
+
+    def test_has_ellipsis_assign_through_ellipsis_view_same_region(self):
+        """
+        view = arr[...]; view[...] = [r.x, r.y, r.z]
+        HAS_ELLIPSIS assign through an ellipsis view — same region, net 0.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.x = self.A()
+        r.y = self.A()
+        r.z = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = arr[...]
+        view[...] = np.array([r.x, r.y, r.z], dtype=object)
+        self.assertEqual(r._lrc, base_lrc)
+
+        view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_has_ellipsis_assign_locals_through_ellipsis_view(self):
+        """
+        view = arr[...]; view[...] = locals
+        Replaces all region borrows with locals — LRC drops by full length.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        view = arr[...]
+        view[...] = np.array([self.A(), self.A(), self.A()], dtype=object)
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+        view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_has_ellipsis_assign_region_through_ellipsis_view_over_locals(self):
+        """
+        view = arr[...]; view[...] = region_values over local slots.
+        Acquires N new borrows — LRC +N.
+        """
+        r = Region()
+        r.x = self.A()
+        r.y = self.A()
+        r.z = self.A()
+
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc
+
+        view = arr[...]
+        view[...] = np.array([r.x, r.y, r.z], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 3)
+
+        view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_has_ellipsis_assign_through_ellipsis_view_of_region_array_locals(self):
+        """
+        view = r.arr[...] (local, LRC +1); view[...] = locals
+        Each local written in increases LRC by 1. View accounts for +1 separately.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.arr = np.array([r.a, r.b], dtype=object)
+        base_lrc = r._lrc
+
+        view = r.arr[...]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        local1 = self.A()
+        local2 = self.A()
+        view[...] = np.array([local1, local2], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 3)  # +1 view, +2 locals in region
+
+        view = None
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        local1 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        local2 = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_has_ellipsis_assign_cross_region_through_ellipsis_view_raises(self):
+        """
+        view = r1.arr[...]; view[...] = r2_values
+        HAS_ELLIPSIS cross-region assign through ellipsis view of region-owned array.
+        Must raise.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[...]
+        with self.assertRaises(Exception):
+            view[...] = np.array([r2.x, r2.y], dtype=object)
+
+    def test_has_ellipsis_assign_cross_region_through_ellipsis_view_lrc_stable(self):
+        """
+        After failed HAS_ELLIPSIS cross-region assign through ellipsis view,
+        both LRCs should be unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        view = r1.arr[...]
+        base_lrc1 = r1._lrc  # +1 for view
+        base_lrc2 = r2._lrc
+
+        try:
+            view[...] = np.array([r2.x, r2.y], dtype=object)
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
 
 if __name__ == "__main__":
     unittest.main()

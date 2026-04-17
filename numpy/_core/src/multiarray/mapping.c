@@ -1545,9 +1545,6 @@ array_subscript(PyArrayObject *self, PyObject *op)
         result = (PyObject *) PyArray_Scalar(item, PyArray_DESCR(self),
                                              (PyObject *)self);
         /* Because the index is full integer, we do not need to decref */
-        // if(PyRegion_TakeRef(self, result)) {
-        //     return NULL;
-        // }
         return result;
     }
 

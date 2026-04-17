@@ -594,32 +594,6 @@ array_dealloc(PyArrayObject *self)
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-// static int
-// array_traverse(PyObject *self, visitproc visit, void *arg)
-// {
-//     PyArrayObject_fields *fa = (PyArrayObject_fields *)self;
-
-//     Py_VISIT(fa->base);
-
-//     if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data && (fa->flags & NPY_ARRAY_OWNDATA)) {
-//     // if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data) {
-//         // There is a redundant travel to the objects that are pointed by "base" and "view", which those should be traversed one time only
-//         // (fa->flags & NPY_ARRAY_OWNDATA) handles this
-//         PyArrayIterObject *it = (PyArrayIterObject *)PyArray_IterNew(self);
-//         if (it == NULL) {
-//             return -1;
-//         }
-//         while (it->index < it->size) {
-//             PyObject *obj = *(PyObject **)it->dataptr;
-//             Py_VISIT(obj);
-//             PyArray_ITER_NEXT(it);
-//         }
-//         Py_DECREF(it);
-//     }
-
-//     return 0;
-// }
-
 static int
 traverse_array_data(visitproc visit, void *arg, char *data, int ndim, npy_intp *shape, npy_intp *strides)
 {
