@@ -626,6 +626,7 @@ array_traverse(PyObject *self, visitproc visit, void *arg)
     // Py_VISIT(fa->descr);
 
     if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data && (fa->flags & NPY_ARRAY_OWNDATA)) {
+    // if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data) {
         return traverse_array_data(visit, arg, fa->data, fa->nd, fa->dimensions, fa->strides);
     }
 

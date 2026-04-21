@@ -859,7 +859,7 @@ OBJECT_getitem2(void *ip, void *NPY_UNUSED(ap), PyArrayObject* src)
     }
     else {
         if(PyRegion_AddLocalRef(obj)){
-            Py_RETURN_NONE;
+            return NULL;
         }
         Py_INCREF(obj);
         return obj;

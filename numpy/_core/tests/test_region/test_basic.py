@@ -75,7 +75,6 @@ class TestBuildWithArray(unittest.TestCase):
 
     def test_array_assignment(self):
         r = Region()
-        r2 = Region()
         r.a = self.A()
         r.b = self.A()
         c = self.A()
@@ -108,6 +107,7 @@ class TestBuildWithArray(unittest.TestCase):
         self.assertEqual(r._lrc, original_lrc)
         r.arr[2] = c
         self.assertEqual(r._lrc, original_lrc+1)
+        self.assertTrue(r.owns(c))
         r.arr = None
         self.assertEqual(r._lrc, original_lrc+1) # SINCE c is still referenced by the region
         c = None
@@ -1204,6 +1204,7 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         local = self.A()
         r.arr[0] = local  # region now holds a reference to local
         self.assertEqual(r._lrc, base_lrc + 1)
+        self.assertTrue(r.owns(local))
 
         r.arr[0] = r.a  
         self.assertEqual(r._lrc, base_lrc + 1)  # "local" still points to the object in the region.
@@ -1222,6 +1223,10 @@ class TestArraySubscriptAssignment(unittest.TestCase):
 
         r.arr[0] = local3  # releases local1, acquires local3 — net 0
         self.assertEqual(r._lrc, base_lrc+1)
+        self.assertTrue(r.owns(local3))
+        self.assertTrue(r.owns(local1))
+        self.assertTrue(r.owns(local2))
+
 
     def test_region_array_overwrite_local_slot_with_region_object(self):
         """
@@ -1254,6 +1259,8 @@ class TestArraySubscriptAssignment(unittest.TestCase):
 
         with self.assertRaises(Exception):
             r1.arr[0] = r2.b
+
+        self.assertEqual(r1.arr[0], r1.a)
 
     # ------------------------------------------------------------------
     # Slice assignment
@@ -1332,6 +1339,7 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         local2 = self.A()
         r.arr[0:2] = np.array([local1, local2], dtype=object)
         self.assertEqual(r._lrc, base_lrc+2)
+        # TODO check if local1 and local2 moves into the region
 
         local1 = None
         self.assertEqual(r._lrc, base_lrc+1)
