@@ -617,7 +617,7 @@ traverse_array_data(visitproc visit, void *arg, char *data, int ndim, npy_intp *
 }
 
 static int
-array_traverse(PyObject *self, visitproc visit, void *arg)
+array_reachable(PyObject *self, visitproc visit, void *arg)
 {
     PyArrayObject_fields *fa = (PyArrayObject_fields *)self;
 
@@ -1429,6 +1429,6 @@ NPY_NO_EXPORT PyTypeObject PyArray_Type = {
     .tp_methods = array_methods,
     .tp_getset = array_getsetlist,
     .tp_new = (newfunc)array_new,
-    .tp_traverse = (traverseproc)array_traverse,
+    .tp_reachable = (traverseproc)array_reachable,
     // .tp_clear = (inquiry)array_clear,
 };

@@ -1,6 +1,6 @@
 import unittest
 from regions import Region, is_local
-from immutable import freeze, isfrozen
+from immutable import freeze, set_freezable, FREEZABLE_YES
 import numpy as np
 
 class TestBuildWithArray(unittest.TestCase):
@@ -8,6 +8,8 @@ class TestBuildWithArray(unittest.TestCase):
         class A: pass
         freeze(A())
         self.A = A
+        set_freezable(np.array([], dtype=np.float64).__class__, FREEZABLE_YES)
+        freeze(np.array([], dtype=np.float64))
     def test_array_creation(self):
         r = Region()
         r.a = self.A()
@@ -156,6 +158,8 @@ class TestRegionNumpyView(unittest.TestCase):
         class A: pass
         freeze(A())
         self.A = A
+        set_freezable(np.array([], dtype=np.float64).__class__, FREEZABLE_YES)
+        freeze(np.array([], dtype=np.float64))
 
     def test_view_does_not_change_lrc(self):
         """
@@ -402,6 +406,8 @@ class TestRegionNumpyViewWithArrayInRegion(unittest.TestCase):
         class A: pass
         freeze(A())
         self.A = A
+        set_freezable(np.array([], dtype=np.float64).__class__, FREEZABLE_YES)
+        freeze(np.array([], dtype=np.float64))
 
     def test_view_of_region_array_increases_lrc(self):
         """
@@ -491,6 +497,8 @@ class TestArraySubscriptEllipsis(unittest.TestCase):
         class A: pass
         freeze(A())
         self.A = A
+        set_freezable(np.array([], dtype=np.float64).__class__, FREEZABLE_YES)
+        freeze(np.array([], dtype=np.float64))
 
     def test_ellipsis_get_does_not_change_lrc(self):
         """
@@ -724,6 +732,8 @@ class TestArraySubscriptHasInteger(unittest.TestCase):
         class A: pass
         freeze(A())
         self.A = A
+        set_freezable(np.array([], dtype=np.float64).__class__, FREEZABLE_YES)
+        freeze(np.array([], dtype=np.float64))
 
     # @unittest.expectedFailure
     # ("Have not handled the barrier to PyArray_Scalar")
@@ -1006,6 +1016,8 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         class A: pass
         freeze(A())
         self.A = A
+        set_freezable(np.array([], dtype=np.float64).__class__, FREEZABLE_YES)
+        freeze(np.array([], dtype=np.float64))
 
     # ------------------------------------------------------------------
     # Basic overwrite: region element replaced by another region element
