@@ -546,6 +546,9 @@ NpyIter_Copy(NpyIter *iter)
     objects = NIT_OPERANDS(newiter);
     dtypes = NIT_DTYPES(newiter);
     for (iop = 0; iop < nop; ++iop) {
+        if(PyRegion_AddLocalRef(objects[iop])) {
+            out_of_memory = 1;
+        }
         Py_INCREF(objects[iop]);
         Py_INCREF(dtypes[iop]);
     }
@@ -709,6 +712,7 @@ NpyIter_Deallocate(NpyIter *iter)
             }
         }
         Py_XDECREF(*dtype);
+        PyRegion_RemoveLocalRef(*object);
         Py_XDECREF(*object);
     }
 
@@ -1175,6 +1179,9 @@ npyiter_prepare_operands(int nop, PyArrayObject **op_in,
      */
     for (iop = 0; iop < nop; ++iop) {
         op[iop] = op_in[iop];
+        if(PyRegion_AddLocalRef(op[iop])) {
+            goto fail_iop;
+        }
         Py_XINCREF(op[iop]);
         op_dtype[iop] = NULL;
 
@@ -1235,6 +1242,7 @@ npyiter_prepare_operands(int nop, PyArrayObject **op_in,
     iop = nop - 1;
   fail_iop:
     for (i = 0; i < iop+1; ++i) {
+        PyRegion_RemoveLocalRef(op[i]);
         Py_XDECREF(op[i]);
         Py_XDECREF(op_dtype[i]);
     }
@@ -3057,6 +3065,7 @@ npyiter_new_temp_array(NpyIter *iter, PyTypeObject *subtype,
             PyErr_SetString(PyExc_RuntimeError,
                     "Iterator automatic output has an array subtype "
                     "which changed the dimensions of the output");
+            assert(PyRegion_IsLocal(ret));
             Py_DECREF(ret);
             return NULL;
         }
@@ -3236,9 +3245,11 @@ npyiter_allocate_arrays(NpyIter *iter,
                 return 0;
             }
             if (PyArray_CopyInto(temp, op[iop]) != 0) {
+                assert(PyRegion_IsLocal(temp));
                 Py_DECREF(temp);
                 return 0;
             }
+            PyRegion_RemoveLocalRef(op[iop]);
             Py_DECREF(op[iop]);
             op[iop] = temp;
 
@@ -3281,6 +3292,7 @@ npyiter_allocate_arrays(NpyIter *iter,
              */
             if (op_itflags[iop] & NPY_OP_ITFLAG_READ) {
                 if (PyArray_CopyInto(temp, op[iop]) != 0) {
+                    assert(PyRegion_IsLocal(temp));
                     Py_DECREF(temp);
                     return 0;
                 }
@@ -3288,14 +3300,21 @@ npyiter_allocate_arrays(NpyIter *iter,
             /* If the data will be written to, set WRITEBACKIFCOPY
                and require a context manager */
             if (op_itflags[iop] & NPY_OP_ITFLAG_WRITE) {
+                if(PyRegion_AddLocalRef(op[iop])){
+                    assert(PyRegion_IsLocal(temp));
+                    Py_DECREF(temp);
+                    return 0;
+                }
                 Py_INCREF(op[iop]);
                 if (PyArray_SetWritebackIfCopyBase(temp, op[iop]) < 0) {
+                    assert(PyRegion_IsLocal(temp));
                     Py_DECREF(temp);
                     return 0;
                 }
                 op_itflags[iop] |= NPY_OP_ITFLAG_HAS_WRITEBACK;
             }
 
+            PyRegion_RemoveLocalRef(op[iop]);
             Py_DECREF(op[iop]);
             op[iop] = temp;
 

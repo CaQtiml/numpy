@@ -989,6 +989,17 @@ array_boolean_subscript(PyArrayObject *self,
     if (ret == NULL) {
         return NULL;
     }
+
+    MyTransferAuxData *auxdata = PyMem_Malloc(sizeof(MyTransferAuxData));
+    if (auxdata == NULL) {
+        return -1;
+    }
+    auxdata->base.free = my_transfer_auxdata_free;
+    auxdata->base.clone = NULL;
+    auxdata->base_arr = PyArray_BASE(ret) ? (PyArrayObject *)PyArray_BASE(ret) : ret;
+    auxdata->src_arr = NULL;
+    auxdata->dst_arr = NULL;
+
     /* not same as *dtype* if the DType class replaces dtypes */
     ret_dtype = PyArray_DESCR(ret);
 
@@ -1019,6 +1030,7 @@ array_boolean_subscript(PyArrayObject *self,
         iter = NpyIter_MultiNew(2, op, flags, order, NPY_NO_CASTING,
                                 op_flags, NULL);
         if (iter == NULL) {
+            assert(PyRegion_IsLocal(ret));
             Py_DECREF(ret);
             return NULL;
         }
@@ -1035,6 +1047,7 @@ array_boolean_subscript(PyArrayObject *self,
                         0,
                         &cast_info,
                         &cast_flags) != NPY_SUCCEED) {
+            assert(PyRegion_IsLocal(ret));
             Py_DECREF(ret);
             NpyIter_Deallocate(iter);
             return NULL;
@@ -1045,6 +1058,7 @@ array_boolean_subscript(PyArrayObject *self,
         /* Get the values needed for the inner loop */
         iternext = NpyIter_GetIterNext(iter, NULL);
         if (iternext == NULL) {
+            assert(PyRegion_IsLocal(ret));
             Py_DECREF(ret);
             NpyIter_Deallocate(iter);
             NPY_cast_info_xfree(&cast_info);
@@ -1080,7 +1094,7 @@ array_boolean_subscript(PyArrayObject *self,
                                         &subloopsize, 0);
                 char *args[2] = {self_data, ret_data};
                 res = cast_info.func(&cast_info.context,
-                        args, &subloopsize, strides, cast_info.auxdata);
+                        args, &subloopsize, strides, auxdata);
                 if (res < 0) {
                     break;
                 }
@@ -1098,6 +1112,7 @@ array_boolean_subscript(PyArrayObject *self,
         NPY_cast_info_xfree(&cast_info);
         if (res < 0) {
             /* Should be practically impossible, since there is no cast */
+            assert(PyRegion_IsLocal(ret));
             Py_DECREF(ret);
             return NULL;
         }
@@ -1111,7 +1126,7 @@ array_boolean_subscript(PyArrayObject *self,
                 Py_TYPE(self), ret_dtype,
                 1, &size, PyArray_STRIDES(ret), PyArray_BYTES(ret),
                 PyArray_FLAGS(ret), (PyObject *)self, (PyObject *)tmp);
-
+        assert(PyRegion_IsLocal(tmp));
         Py_DECREF(tmp);
         if (ret == NULL) {
             return NULL;
@@ -1191,6 +1206,16 @@ array_assign_boolean_subscript(PyArrayObject *self,
     }
 
     v_data = PyArray_DATA(v);
+
+    MyTransferAuxData *auxdata = PyMem_Malloc(sizeof(MyTransferAuxData));
+    if (auxdata == NULL) {
+        return -1;
+    }
+    auxdata->base.free = my_transfer_auxdata_free;
+    auxdata->base.clone = NULL;
+    auxdata->base_arr = PyArray_BASE(self) ? (PyArrayObject *)PyArray_BASE(self) : self;
+    auxdata->src_arr = NULL;
+    auxdata->dst_arr = NULL;
 
     /* Create an iterator for the data */
     int res = 0;
@@ -1278,7 +1303,7 @@ array_assign_boolean_subscript(PyArrayObject *self,
 
                 char *args[2] = {v_data, self_data};
                 res = cast_info.func(&cast_info.context,
-                        args, &subloopsize, strides, cast_info.auxdata);
+                        args, &subloopsize, strides, auxdata);
                 if (res < 0) {
                     break;
                 }

@@ -2331,5 +2331,610 @@ class TestArraySubscriptAssignment(unittest.TestCase):
         self.assertEqual(r1._lrc, base_lrc1)
         self.assertEqual(r2._lrc, base_lrc2)
 
+class TestArraySubscriptBool(unittest.TestCase):
+    """
+    Tests for array_subscript via HAS_BOOL path.
+    arr[bool_mask] produces a COPY (not a view) of the selected elements.
+    The copy is independent from the source array after creation.
+    """
+
+    def setUp(self):
+        class A: pass
+        freeze(A())
+        self.A = A
+        set_freezable(np.array([], dtype=np.float64).__class__, FREEZABLE_YES)
+        freeze(np.array([], dtype=np.float64))
+
+    # ------------------------------------------------------------------
+    # Guideline 1: Both local — no region state change
+    # ------------------------------------------------------------------
+
+    def test_bool_get_all_local_no_lrc_change(self):
+        """
+        Both source array and result copy contain only local objects.
+        No region exists in this interaction — no LRC change anywhere.
+        """
+        r = Region()
+        a = self.A()
+        b = self.A()
+        c = self.A()
+        base_lrc = r._lrc
+
+        arr = np.array([a, b, c], dtype=object)
+        mask = np.array([True, False, True], dtype=bool)
+        result = arr[mask]
+
+        self.assertEqual(r._lrc, base_lrc)
+
+        result = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_get_local_result_is_independent_copy(self):
+        """
+        The boolean-indexed result is a copy. Modifying (releasing) the
+        source array does not affect the copy, and vice versa.
+        No regions involved — LRC stays at baseline throughout.
+        """
+        r = Region()
+        a = self.A()
+        b = self.A()
+        base_lrc = r._lrc
+
+        arr = np.array([a, b], dtype=object)
+        mask = np.array([True, True], dtype=bool)
+        result = arr[mask]
+
+        arr = None  # source gone
+        self.assertEqual(r._lrc, base_lrc)  # result is independent copy
+
+        result = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Guideline 2: Local source, regional target — adding reference (LRC +N)
+    # ------------------------------------------------------------------
+
+    def test_bool_get_region_elements_into_local_copy_increases_lrc(self):
+        """
+        arr contains region objects. arr[mask] copies selected region objects
+        into a new local array. Each selected element adds a borrow — LRC +N
+        where N is the number of True entries in the mask.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        mask = np.array([True, False, True], dtype=bool)
+        result = arr[mask]  # copies r.a and r.c into result
+        self.assertEqual(r._lrc, base_lrc + 2)  # 2 additional borrows in result
+
+    def test_bool_get_all_true_mask_borrows_all(self):
+        """
+        A fully True mask copies all elements — LRC increases by full array length.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        mask = np.array([True, True, True], dtype=bool)
+        result = arr[mask]
+        self.assertEqual(r._lrc, base_lrc + 3)
+
+    def test_bool_get_single_true_borrows_one(self):
+        """
+        A mask with a single True copies one element — LRC increases by 1.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([False, True, False], dtype=bool)
+        result = arr[mask]
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+    def test_bool_get_all_false_mask_borrows_none(self):
+        """
+        A fully False mask produces an empty copy — LRC unchanged.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([False, False, False], dtype=bool)
+        result = arr[mask]
+        self.assertEqual(r._lrc, base_lrc)
+
+        result = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Guideline 3: Local source, regional target — removing reference (LRC -N)
+    # ------------------------------------------------------------------
+
+    def test_bool_get_result_release_decreases_lrc(self):
+        """
+        Releasing the boolean-indexed copy releases its borrows on the region.
+        LRC drops back to the pre-result baseline.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([True, False, True], dtype=bool)
+        result = arr[mask]
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        result = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_get_source_release_does_not_affect_result_borrows(self):
+        """
+        Because the boolean result is a copy, releasing arr does not release
+        the borrows held by result. LRC stays elevated until result is released.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        base_lrc = r._lrc
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        mask = np.array([True, True, True], dtype=bool)
+        result = arr[mask]
+
+        arr = None  # source released — result is independent copy
+        self.assertEqual(r._lrc, base_lrc + 3)  # result still holds all borrows
+
+        result = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_get_partial_release_decreases_lrc_by_selected_count(self):
+        """
+        Two separate boolean gets over the same array each contribute
+        independent borrows. Releasing one drops LRC by its selected count,
+        releasing the other drops the remainder.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.d = self.A()
+
+        arr = np.array([r.a, r.b, r.c, r.d], dtype=object)
+        base_lrc = r._lrc  # borrows 4
+
+        result1 = arr[np.array([True, True, False, False], dtype=bool)]  # r.a, r.b
+        result2 = arr[np.array([False, False, True, True], dtype=bool)]  # r.c, r.d
+        self.assertEqual(r._lrc, base_lrc + 4)
+
+        result1 = None
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        result2 = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Guideline 4: Regional source, local target — ephemeral move
+    # ------------------------------------------------------------------
+
+    def test_bool_get_from_region_array_increases_lrc(self):
+        """
+        Boolean indexing a region-owned array produces a local copy.
+        The copy is a local object pointing into the region — LRC +N
+        for N selected elements, plus the existing +1 for the copy object itself
+        pointing back to r.arr's region.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([True, False, True], dtype=bool)
+        result = r.arr[mask]
+        # result is a local copy holding borrows on r.a and r.c
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+    def test_bool_get_from_region_array_release_decreases_lrc(self):
+        """
+        Releasing the local copy from a region-owned array boolean index
+        releases all its borrows. LRC returns to pre-result baseline.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([True, True, False], dtype=bool)
+        result = r.arr[mask]
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        result = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Guideline 5: Cross-region references must raise
+    # ------------------------------------------------------------------
+
+    def test_bool_get_result_into_other_region_raises(self):
+        """
+        Storing the boolean-indexed result (a local copy containing r1 objects)
+        directly into r2 should raise a region isolation violation.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.c = self.A()
+        r1.arr = np.array([r1.a, r1.b, r1.c], dtype=object)
+
+        mask = np.array([True, True, False], dtype=bool)
+        with self.assertRaises(Exception):
+            r2.result = r1.arr[mask]
+
+    def test_bool_get_cross_region_lrc_stable_after_failure(self):
+        """
+        After a failed attempt to store a boolean-indexed result into a
+        foreign region, both LRCs should be unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        mask = np.array([True, True], dtype=bool)
+        try:
+            r2.result = r1.arr[mask]
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+
+class TestArrayAssignSubscriptBool(unittest.TestCase):
+    """
+    Tests for array_assign_subscript via HAS_BOOL path.
+    arr[bool_mask] = values writes into selected slots of arr.
+    Routes through array_assign_boolean_subscript in mapping.c.
+    """
+
+    def setUp(self):
+        class A: pass
+        freeze(A())
+        self.A = A
+        set_freezable(np.array([], dtype=np.float64).__class__, FREEZABLE_YES)
+        freeze(np.array([], dtype=np.float64))
+
+    # ------------------------------------------------------------------
+    # Guideline 1: Both local — no region state change
+    # ------------------------------------------------------------------
+
+    def test_bool_assign_all_local_no_lrc_change(self):
+        """
+        Both arr and values contain only local objects.
+        Boolean assignment over local slots with local values — no LRC change.
+        """
+        r = Region()
+        a = self.A()
+        b = self.A()
+        x = self.A()
+        base_lrc = r._lrc
+
+        arr = np.array([a, b], dtype=object)
+        mask = np.array([True, False], dtype=bool)
+        arr[mask] = np.array([x], dtype=object)
+
+        self.assertEqual(r._lrc, base_lrc)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Guideline 2: Local source, regional target — adding reference (LRC +N)
+    # ------------------------------------------------------------------
+
+    def test_bool_assign_region_values_into_local_array_increases_lrc(self):
+        """
+        arr is local. Assigning region objects into selected slots via boolean
+        mask acquires borrows — LRC increases by the number of True entries.
+        """
+        r = Region()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc  # 0 borrows
+
+        mask = np.array([True, False, True], dtype=bool)
+        arr[mask] = np.array([r.x, r.y], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_assign_all_true_mask_borrows_all(self):
+        """
+        A fully True mask assigns region objects into every slot —
+        LRC increases by full array length.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([True, True, True], dtype=bool)
+        arr[mask] = np.array([r.a, r.b, r.c], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 3)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_assign_single_true_borrows_one(self):
+        """
+        A mask with a single True assigns one region object — LRC +1.
+        """
+        r = Region()
+        r.x = self.A()
+
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([False, True, False], dtype=bool)
+        arr[mask] = np.array([r.x], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_assign_all_false_mask_no_lrc_change(self):
+        """
+        A fully False mask writes nothing — LRC unchanged.
+        """
+        r = Region()
+        r.x = self.A()
+
+        arr = np.array([self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([False, False], dtype=bool)
+        arr[mask] = np.array([], dtype=object)
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Guideline 3: Local source, regional target — removing reference (LRC -N)
+    # ------------------------------------------------------------------
+
+    def test_bool_assign_local_values_over_region_slots_decreases_lrc(self):
+        """
+        arr contains region objects. Assigning local values over selected
+        region slots via boolean mask releases those borrows — LRC -N.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        mask = np.array([True, False, True], dtype=bool)
+        arr[mask] = np.array([self.A(), self.A()], dtype=object)
+        self.assertEqual(r._lrc, base_lrc - 2)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_bool_assign_same_region_values_over_region_slots_net_zero(self):
+        """
+        Assigning same-region objects over same-region slots via boolean mask:
+        each selected slot releases one borrow and acquires one — net LRC 0.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        mask = np.array([True, False, True], dtype=bool)
+        arr[mask] = np.array([r.x, r.y], dtype=object)
+        self.assertEqual(r._lrc, base_lrc)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    # ------------------------------------------------------------------
+    # Guideline 4: Regional source, local target — ephemeral move
+    # ------------------------------------------------------------------
+
+    def test_bool_assign_local_values_into_region_array_increases_lrc(self):
+        """
+        r.arr is region-owned. Assigning local values into selected slots via
+        boolean mask causes the region to hold references to locals — LRC +N.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        local1 = self.A()
+        local2 = self.A()
+        mask = np.array([True, False, True], dtype=bool)
+        r.arr[mask] = np.array([local1, local2], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 2)  # region now holds local1, local2
+        self.assertTrue(r.owns(local1))
+        self.assertTrue(r.owns(local2))
+
+        local1 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        local2 = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_assign_region_values_into_region_array_same_region_net_zero(self):
+        """
+        r.arr[mask] = same-region values. Each selected slot replaces one
+        region object with another — net LRC 0.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.x = self.A()
+        r.y = self.A()
+        r.arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([True, False, True], dtype=bool)
+        r.arr[mask] = np.array([r.x, r.y], dtype=object)
+        self.assertEqual(r._lrc, base_lrc)
+
+    # ------------------------------------------------------------------
+    # Guideline 5: Cross-region references must raise
+    # ------------------------------------------------------------------
+
+    def test_bool_assign_cross_region_into_local_array_raises(self):
+        """
+        arr is local but currently holds r1 objects. Assigning r2 objects
+        via boolean mask is permitted for a local array (no region isolation
+        on the array itself), but each slot independently tracks its borrow.
+        This test confirms the correct per-region LRC accounting.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+
+        arr = np.array([r1.a, r1.b], dtype=object)
+        base_lrc1 = r1._lrc  # borrows 2
+        base_lrc2 = r2._lrc  # borrows 0
+
+        mask = np.array([True, False], dtype=bool)
+        arr[mask] = np.array([r2.x], dtype=object)
+        self.assertEqual(r1._lrc, base_lrc1 - 1)
+        self.assertEqual(r2._lrc, base_lrc2 + 1)
+        arr = None
+        self.assertEqual(r1._lrc, base_lrc1 - 2)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+    def test_bool_assign_cross_region_into_region_array_raises(self):
+        """
+        r1.arr[mask] = r2_values should raise a region isolation violation —
+        boolean mask assignment into a region-owned array with foreign-region values.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+
+        mask = np.array([True, True], dtype=bool)
+        with self.assertRaises(Exception):
+            r1.arr[mask] = np.array([r2.x, r2.y], dtype=object)
+
+    def test_bool_assign_cross_region_lrc_stable_after_failure(self):
+        """
+        After a failed cross-region boolean mask assignment into a region-owned
+        array, both regions' LRCs should be unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r2.x = self.A()
+        r2.y = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        mask = np.array([True, True], dtype=bool)
+        try:
+            r1.arr[mask] = np.array([r2.x, r2.y], dtype=object)
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+    def test_bool_assign_partial_cross_region_into_region_array_raises(self):
+        """
+        Even a single-element boolean mask assignment of a foreign-region
+        value into a region-owned array should raise.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.c = self.A()
+        r2.x = self.A()
+        r1.arr = np.array([r1.a, r1.b, r1.c], dtype=object)
+
+        mask = np.array([False, True, False], dtype=bool)
+        with self.assertRaises(Exception):
+            r1.arr[mask] = np.array([r2.x], dtype=object)
+
+    def test_bool_assign_partial_cross_region_lrc_stable_after_failure(self):
+        """
+        After a failed partial boolean mask cross-region assignment,
+        both LRCs should be unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.c = self.A()
+        r2.x = self.A()
+        r1.arr = np.array([r1.a, r1.b, r1.c], dtype=object)
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        mask = np.array([False, True, False], dtype=bool)
+        try:
+            r1.arr[mask] = np.array([r2.x], dtype=object)
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
 if __name__ == "__main__":
     unittest.main()
