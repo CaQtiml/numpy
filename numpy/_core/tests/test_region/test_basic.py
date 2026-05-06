@@ -2935,6 +2935,465 @@ class TestArrayAssignSubscriptBool(unittest.TestCase):
 
         self.assertEqual(r1._lrc, base_lrc1)
         self.assertEqual(r2._lrc, base_lrc2)
+    
+class TestArrayAssignSubscriptBoolLHSVariousRHS(unittest.TestCase):
+    """
+    Tests for arr[bool_mask] = src[rhs_index] where the RHS value comes
+    from HAS_INTEGER, HAS_SLICE, or HAS_ELLIPSIS indexing.
+    Completes the 4x4 matrix for boolean mask LHS.
+    """
+
+    def setUp(self):
+        class A: pass
+        freeze(A())
+        self.A = A
+        set_freezable(np.array([], dtype=np.float64).__class__, FREEZABLE_YES)
+        freeze(np.array([], dtype=np.float64))
+
+    # ------------------------------------------------------------------
+    # LHS: bool mask, RHS: HAS_INTEGER (src[i])
+    # ------------------------------------------------------------------
+
+    def test_bool_lhs_integer_rhs_same_region(self):
+        """
+        arr[mask] = [src[i]] where both arr and src are from the same region.
+        Selected slot swaps one region borrow for another — net LRC 0.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.x = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        item = r.x              # HAS_INTEGER get: LRC +1
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        mask = np.array([True, False, False], dtype=bool)
+        arr[mask] = np.array([item], dtype=object)  # r.a → r.x, net 0
+        self.assertEqual(r._lrc, base_lrc + 1)      # item still alive
+
+        item = None
+        self.assertEqual(r._lrc, base_lrc)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_bool_lhs_integer_rhs_local_over_region(self):
+        """
+        arr[mask] = [local] where arr held region objects.
+        Selected slots release region borrows — LRC -N.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        local_src = np.array([self.A(), self.A()], dtype=object)
+        item0 = local_src[0]   # HAS_INTEGER get of a local — no LRC change
+        item1 = local_src[1]
+        self.assertEqual(r._lrc, base_lrc)
+
+        mask = np.array([True, True, False], dtype=bool)
+        arr[mask] = np.array([item0, item1], dtype=object)
+        self.assertEqual(r._lrc, base_lrc - 2)
+
+        item0 = None
+        item1 = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_bool_lhs_integer_rhs_region_over_locals(self):
+        """
+        arr[mask] = [src[i]] where arr held locals and src[i] is a region object.
+        Selected slots acquire new borrows — LRC +N.
+        """
+        r = Region()
+        r.x = self.A()
+        r.y = self.A()
+
+        src = np.array([r.x, r.y], dtype=object)
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        base_lrc = r._lrc  # src borrows 2
+
+        item0 = src[0]         # HAS_INTEGER: LRC +1
+        item1 = src[1]         # HAS_INTEGER: LRC +1
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        mask = np.array([True, True, False], dtype=bool)
+        arr[mask] = np.array([item0, item1], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 4)  # arr now also holds r.x, r.y
+
+        item0 = None
+        item1 = None
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        arr = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_lhs_integer_rhs_into_region_array_local(self):
+        """
+        r.arr[mask] = [local_src[i]] — local object fetched by integer index
+        written into a region-owned array via bool mask. Region acquires borrow.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        local = self.A()
+        r.arr = np.array([r.a, r.b], dtype=object)
+        base_lrc = r._lrc
+
+        mask = np.array([True, False], dtype=bool)
+        r.arr[mask] = np.array([local], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 1)
+        self.assertTrue(r.owns(local))
+
+        local = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_lhs_integer_rhs_cross_region_raises(self):
+        """
+        r1.arr[mask] = [r2_item] where r2_item came from HAS_INTEGER on r2's array.
+        Must raise region isolation violation.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.arr = np.array([r1.a], dtype=object)
+        r2.x = self.A()
+        r2.src = np.array([r2.x], dtype=object)
+
+        item = r2.src[0]       # HAS_INTEGER get from r2 — LRC +1 on r2
+        mask = np.array([True], dtype=bool)
+        with self.assertRaises(Exception):
+            r1.arr[mask] = np.array([item], dtype=object)
+
+    def test_bool_lhs_integer_rhs_cross_region_lrc_stable(self):
+        """
+        After failed bool-LHS + integer-RHS cross-region assignment,
+        both LRCs unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.arr = np.array([r1.a], dtype=object)
+        r2.x = self.A()
+        r2.src = np.array([r2.x], dtype=object)
+
+        item = r2.src[0]
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        mask = np.array([True], dtype=bool)
+        try:
+            r1.arr[mask] = np.array([item], dtype=object)
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+        item = None
+
+    # ------------------------------------------------------------------
+    # LHS: bool mask, RHS: HAS_SLICE (src[0:n])
+    # ------------------------------------------------------------------
+
+    def test_bool_lhs_slice_rhs_same_region(self):
+        """
+        arr[mask] = src[0:2] where both are same-region.
+        Selected slots swap region borrows — net LRC 0.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        src = np.array([r.x, r.y], dtype=object)
+        base_lrc = r._lrc  # borrows 5
+
+        # HAS_SLICE on local src — no LRC change (view shares buffer)
+        sliced = src[0:2]
+        self.assertEqual(r._lrc, base_lrc)
+
+        mask = np.array([True, True, False], dtype=bool)
+        arr[mask] = sliced     # r.a→r.x, r.b→r.y — net 0
+        self.assertEqual(r._lrc, base_lrc)
+
+        sliced = None
+        src = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 5)
+
+    def test_bool_lhs_slice_rhs_local_over_region(self):
+        """
+        arr[mask] = local_src[0:2] where arr held region objects.
+        Selected slots release region borrows — LRC -N.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        local_src = np.array([self.A(), self.A()], dtype=object)
+        sliced = local_src[0:2]  # view of locals — no LRC change
+        self.assertEqual(r._lrc, base_lrc)
+
+        mask = np.array([True, True, False], dtype=bool)
+        arr[mask] = sliced
+        self.assertEqual(r._lrc, base_lrc - 2)
+
+        sliced = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_bool_lhs_slice_rhs_region_over_locals(self):
+        """
+        arr[mask] = src[0:2] where arr held locals.
+        Selected slots acquire new region borrows — LRC +N.
+        """
+        r = Region()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        src = np.array([r.x, r.y], dtype=object)
+        base_lrc = r._lrc  # src borrows 2
+
+        sliced = src[0:2]      # view — no LRC change
+        self.assertEqual(r._lrc, base_lrc)
+
+        mask = np.array([True, True, False], dtype=bool)
+        arr[mask] = sliced
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+    def test_bool_lhs_slice_rhs_into_region_array_local(self):
+        """
+        r.arr[mask] = local_src[0:2] — slice of locals written into
+        region array via bool mask. Region acquires borrows on locals.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.arr = np.array([r.a, r.b], dtype=object)
+        base_lrc = r._lrc
+
+        local1 = self.A()
+        local2 = self.A()
+        local_src = np.array([local1, local2], dtype=object)
+        sliced = local_src[0:2]
+
+        mask = np.array([True, True], dtype=bool)
+        r.arr[mask] = sliced
+        self.assertEqual(r._lrc, base_lrc + 4)
+
+    def test_bool_lhs_slice_rhs_cross_region_raises(self):
+        """
+        r1.arr[mask] = r2_src[0:2] should raise region isolation violation.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+        r2.x = self.A()
+        r2.y = self.A()
+        r2.src = np.array([r2.x, r2.y], dtype=object)
+
+        sliced = r2.src[0:2]
+        mask = np.array([True, True], dtype=bool)
+        with self.assertRaises(Exception):
+            r1.arr[mask] = sliced
+
+    def test_bool_lhs_slice_rhs_cross_region_lrc_stable(self):
+        """
+        After failed bool-LHS + slice-RHS cross-region assignment,
+        both LRCs unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+        r2.x = self.A()
+        r2.y = self.A()
+        r2.src = np.array([r2.x, r2.y], dtype=object)
+
+        sliced = r2.src[0:2]
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        mask = np.array([True, True], dtype=bool)
+        try:
+            r1.arr[mask] = sliced
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
+
+    # ------------------------------------------------------------------
+    # LHS: bool mask, RHS: HAS_ELLIPSIS (src[...])
+    # ------------------------------------------------------------------
+
+    def test_bool_lhs_ellipsis_rhs_same_region(self):
+        """
+        arr[mask] = src[...] where both are same-region.
+        src[...] is a view — no extra LRC. Selected slots swap borrows, net 0.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        src = np.array([r.x, r.y], dtype=object)
+        base_lrc = r._lrc  # borrows 5
+
+        ellipsis_view = src[...]   # view — no LRC change
+        self.assertEqual(r._lrc, base_lrc)
+
+        mask = np.array([True, True, False], dtype=bool)
+        arr[mask] = ellipsis_view  # r.a→r.x, r.b→r.y — net 0
+        self.assertEqual(r._lrc, base_lrc)
+
+        ellipsis_view = None
+        src = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 5)
+
+    def test_bool_lhs_ellipsis_rhs_local_over_region(self):
+        """
+        arr[mask] = local_src[...] where arr held region objects.
+        Selected slots release region borrows — LRC -N.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.c = self.A()
+
+        arr = np.array([r.a, r.b, r.c], dtype=object)
+        base_lrc = r._lrc  # borrows 3
+
+        local_src = np.array([self.A(), self.A()], dtype=object)
+        ellipsis_view = local_src[...]  # view of locals — no LRC change
+        self.assertEqual(r._lrc, base_lrc)
+
+        mask = np.array([True, True, False], dtype=bool)
+        arr[mask] = ellipsis_view
+        self.assertEqual(r._lrc, base_lrc - 2)
+
+        ellipsis_view = None
+        arr = None
+        self.assertEqual(r._lrc, base_lrc - 3)
+
+    def test_bool_lhs_ellipsis_rhs_region_over_locals(self):
+        """
+        arr[mask] = src[...] where arr held locals.
+        Acquires new region borrows — LRC +N.
+        """
+        r = Region()
+        r.x = self.A()
+        r.y = self.A()
+
+        arr = np.array([self.A(), self.A(), self.A()], dtype=object)
+        src = np.array([r.x, r.y], dtype=object)
+        base_lrc = r._lrc  # src borrows 2
+
+        ellipsis_view = src[...]   # view — no LRC change
+        self.assertEqual(r._lrc, base_lrc)
+
+        mask = np.array([True, True, False], dtype=bool)
+        arr[mask] = ellipsis_view
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+    def test_bool_lhs_ellipsis_rhs_into_region_array_local(self):
+        """
+        r.arr[mask] = local_src[...] — ellipsis view of locals written into
+        region array via bool mask. Region acquires borrows on locals.
+        """
+        r = Region()
+        r.a = self.A()
+        r.b = self.A()
+        r.arr = np.array([r.a, r.b], dtype=object)
+        base_lrc = r._lrc
+
+        local1 = self.A()
+        local2 = self.A()
+        local_src = np.array([local1, local2], dtype=object)
+        ellipsis_view = local_src[...]
+
+        mask = np.array([True, True], dtype=bool)
+        r.arr[mask] = ellipsis_view
+        self.assertEqual(r._lrc, base_lrc + 4)
+        self.assertTrue(r.owns(local1))
+        self.assertTrue(r.owns(local2))
+
+        ellipsis_view = None
+        local_src = None
+        local1 = None
+        self.assertEqual(r._lrc, base_lrc + 1)
+
+        local2 = None
+        self.assertEqual(r._lrc, base_lrc)
+
+    def test_bool_lhs_ellipsis_rhs_cross_region_raises(self):
+        """
+        r1.arr[mask] = r2_src[...] should raise region isolation violation.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+        r2.x = self.A()
+        r2.y = self.A()
+        r2.src = np.array([r2.x, r2.y], dtype=object)
+
+        ellipsis_view = r2.src[...]
+        mask = np.array([True, True], dtype=bool)
+        with self.assertRaises(Exception):
+            r1.arr[mask] = ellipsis_view
+
+    def test_bool_lhs_ellipsis_rhs_cross_region_lrc_stable(self):
+        """
+        After failed bool-LHS + ellipsis-RHS cross-region assignment,
+        both LRCs unchanged.
+        """
+        r1 = Region()
+        r2 = Region()
+        r1.a = self.A()
+        r1.b = self.A()
+        r1.arr = np.array([r1.a, r1.b], dtype=object)
+        r2.x = self.A()
+        r2.y = self.A()
+        r2.src = np.array([r2.x, r2.y], dtype=object)
+
+        ellipsis_view = r2.src[...]
+        base_lrc1 = r1._lrc
+        base_lrc2 = r2._lrc
+
+        mask = np.array([True, True], dtype=bool)
+        try:
+            r1.arr[mask] = ellipsis_view
+        except Exception:
+            pass
+
+        self.assertEqual(r1._lrc, base_lrc1)
+        self.assertEqual(r2._lrc, base_lrc2)
 
 if __name__ == "__main__":
     unittest.main()
