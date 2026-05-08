@@ -418,11 +418,11 @@ dtypemeta_traverse(PyArray_DTypeMeta *type, visitproc visit, void *arg)
      * in the future when we implement HeapTypes (python/dynamically
      * defined types). It should be revised at that time.
      */
-    assert(0);
-    assert(!NPY_DT_is_legacy(type) && (PyTypeObject *)type != &PyArrayDescr_Type);
+    // assert(0);
+    // assert(!NPY_DT_is_legacy(type) && (PyTypeObject *)type != &PyArrayDescr_Type);
     Py_VISIT(type->singleton);
     Py_VISIT(type->scalar_type);
-    return PyType_Type.tp_traverse((PyObject *)type, visit, arg);
+    return PyType_Type.tp_reachable((PyObject *)type, visit, arg);
 }
 
 
@@ -1146,6 +1146,7 @@ dtypemeta_wrap_legacy_descriptor(
      * Any Type slots need to be fixed before PyType_Ready, although most
      * will be inherited automatically there.
      */
+    // TODO: Reason of freeze: type 'numpy.dtypes.ObjectDType' has no tp_traverse and no tp_reachable
     static PyArray_DTypeMeta prototype = {
         {{
             PyVarObject_HEAD_INIT(&PyArrayDTypeMeta_Type, 0)
@@ -1377,6 +1378,7 @@ NPY_NO_EXPORT PyTypeObject PyArrayDTypeMeta_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
     .tp_doc = "Preliminary NumPy API: The Type of NumPy DTypes (metaclass)",
     .tp_traverse = (traverseproc)dtypemeta_traverse,
+    .tp_reachable = (traverseproc)dtypemeta_traverse,
     .tp_members = dtypemeta_members,
     .tp_getset = dtypemeta_getset,
     .tp_base = NULL,  /* set to PyType_Type at import time */

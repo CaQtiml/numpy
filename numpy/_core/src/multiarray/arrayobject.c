@@ -621,9 +621,10 @@ array_reachable(PyObject *self, visitproc visit, void *arg)
 {
     PyArrayObject_fields *fa = (PyArrayObject_fields *)self;
 
-    // Py_VISIT(fa->mem_handler);
+    Py_VISIT(self->ob_type);
+    Py_VISIT(fa->mem_handler);
     Py_VISIT(fa->base);
-    // Py_VISIT(fa->descr);
+    Py_VISIT(fa->descr);
 
     if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data && (fa->flags & NPY_ARRAY_OWNDATA)) {
     // if (fa->descr && PyDataType_REFCHK(fa->descr) && fa->data) {

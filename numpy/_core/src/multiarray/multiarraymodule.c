@@ -4986,6 +4986,10 @@ _multiarray_umath_exec(PyObject *m) {
         return -1;
     }
 
+    if (_PyImmutability_SetFreezable((PyObject *)&PyArrayDTypeMeta_Type, _Py_FREEZABLE_YES)) {
+        return -1;
+    }
+
     PyArrayDescr_Type.tp_hash = PyArray_DescrHash;
     Py_SET_TYPE(&PyArrayDescr_Type, &PyArrayDTypeMeta_Type);
     if (PyType_Ready(&PyArrayDescr_Type) < 0) {
@@ -5000,6 +5004,10 @@ _multiarray_umath_exec(PyObject *m) {
     }
 
     if (PyType_Ready(&PyArray_Type) < 0) {
+        return -1;
+    }
+
+    if (_PyImmutability_SetFreezable((PyObject *)&PyArray_Type, _Py_FREEZABLE_YES)) {
         return -1;
     }
     if (setup_scalartypes(d) < 0) {
