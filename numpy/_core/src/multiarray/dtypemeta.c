@@ -425,6 +425,25 @@ dtypemeta_traverse(PyArray_DTypeMeta *type, visitproc visit, void *arg)
     return PyType_Type.tp_reachable((PyObject *)type, visit, arg);
 }
 
+static int
+legacy_descr_tp_traverse(PyObject *self, visitproc visit, void *arg)
+{
+    _PyArray_LegacyDescr *descr = (_PyArray_LegacyDescr *)self;
+
+    Py_VISIT(self->ob_type);
+    Py_VISIT(descr->typeobj);
+    Py_VISIT(descr->metadata);
+    Py_VISIT(descr->fields);
+    Py_VISIT(descr->names);
+
+    if (descr->subarray != NULL) {
+        Py_VISIT(descr->subarray->base);
+        Py_VISIT(descr->subarray->shape);  // ← tuple, must visit
+    }
+
+    return 0;
+}
+
 
 static PyObject *
 legacy_dtype_default_new(PyArray_DTypeMeta *self,
@@ -1155,6 +1174,8 @@ dtypemeta_wrap_legacy_descriptor(
             .tp_flags = Py_TPFLAGS_DEFAULT,
             .tp_base = NULL,  /* set below */
             .tp_new = (newfunc)legacy_dtype_default_new,
+            .tp_traverse = (traverseproc)legacy_descr_tp_traverse,
+            .tp_reachable = (traverseproc)legacy_descr_tp_traverse,
             .tp_doc = NULL,  /* set in python */
         },},
         .flags = NPY_DT_LEGACY,

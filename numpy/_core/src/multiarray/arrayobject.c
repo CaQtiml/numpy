@@ -622,6 +622,7 @@ array_reachable(PyObject *self, visitproc visit, void *arg)
     PyArrayObject_fields *fa = (PyArrayObject_fields *)self;
 
     Py_VISIT(self->ob_type);
+    // Py_VISIT(fa->weakreflist);
     Py_VISIT(fa->mem_handler);
     Py_VISIT(fa->base);
     Py_VISIT(fa->descr);
