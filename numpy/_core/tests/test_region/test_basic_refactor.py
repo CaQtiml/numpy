@@ -1328,6 +1328,9 @@ class TestArrayAssign_DirectEllipsis(unittest.TestCase):
         local2 = self.A()
         local3 = self.A()
         r.arr[...] = np.array([local1, local2, local3], dtype=object)
+        self.assertTrue(r.owns(local1))
+        self.assertTrue(r.owns(local2))
+        self.assertTrue(r.owns(local3))
         self.assertEqual(r._lrc, base_lrc + 3)
         local1 = None
         self.assertEqual(r._lrc, base_lrc + 2)
@@ -1342,10 +1345,15 @@ class TestArrayAssign_DirectEllipsis(unittest.TestCase):
         r.b = self.A()
         local1 = self.A()
         local2 = self.A()
-        r.arr = np.array([local1, local2], dtype=object)
         base_lrc = r._lrc
+        r.arr = np.array([local1, local2], dtype=object)
+        self.assertEqual(r._lrc, base_lrc + 2)
+
+        base_lrc2 = r._lrc
         r.arr[...] = np.array([r.a, r.b], dtype=object)
-        self.assertEqual(r._lrc, base_lrc)
+        self.assertTrue(r.owns(local1))
+        self.assertTrue(r.owns(local2))
+        self.assertEqual(r._lrc, base_lrc2)
 
     # Guideline 5 — cross-region raises
     def test_ellipsis_assign_cross_region_into_region_array_raises(self):

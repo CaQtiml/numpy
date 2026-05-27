@@ -1967,6 +1967,9 @@ array_assign_subscript(PyArrayObject *self, PyObject *ind, PyObject *op)
             }
         }
         else {
+            if(PyRegion_AddLocalRef(op)) {
+                return -1;
+            }
             Py_INCREF(op);
             tmp_arr = (PyArrayObject *)op;
         }

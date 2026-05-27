@@ -777,12 +777,14 @@ PyArray_AssignArray2(PyArrayObject* self, PyArrayObject *dst, PyArrayObject *src
     }
 
     if (copied_src) {
+        PyRegion_RemoveLocalRef(src);
         Py_DECREF(src);
     }
     return 0;
 
 fail:
     if (copied_src) {
+        PyRegion_RemoveLocalRef(src);
         Py_DECREF(src);
     }
     return -1;
